@@ -15,7 +15,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v12';
 const APP_BUILT = '2026-08-14';
 
 /* ======================= Storage ======================= */
@@ -155,12 +155,13 @@ const GRID_START_MIN = 6 * 60;   // 6:00 AM
 const GRID_END_MIN = 23 * 60;    // 11:00 PM
 const PX_PER_MIN = 56 / 60;
 
-function toast(msg) {
+function toast(msg, ms) {
   const el = document.getElementById('toast');
+  if (!el) return;
   el.textContent = msg;
   el.hidden = false;
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.hidden = true; }, 1800);
+  toast._t = setTimeout(() => { el.hidden = true; }, ms || 1800);
 }
 
 /* ======================= Initial state =======================
@@ -2762,8 +2763,33 @@ on('settingsBtn', 'click', () => {
    reload. Closing and reopening an installed PWA is not always enough. */
 on('forceUpdateBtn', 'click', async () => {
   const btn = document.getElementById('forceUpdateBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Updating…'; }
-  toast('Clearing cache…');
+  const restore = () => { if (btn) { btn.disabled = false; btn.textContent = 'Check for update'; } };
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+
+  // Ask the server what version it holds before tearing anything down, so the
+  // button can actually answer "is there an update?" instead of silently
+  // reloading into the same build.
+  let remote = null;
+  try {
+    const res = await fetch('js/app.js?cb=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const txt = await res.text();
+      const m = txt.match(/APP_VERSION\s*=\s*'([^']+)'/);
+      if (m) remote = m[1];
+    }
+  } catch (e) {
+    console.warn('[DayFlow] version check failed', e);
+  }
+
+  if (remote && remote === APP_VERSION) {
+    toast(`Already up to date (${APP_VERSION})`, 3500);
+    restore();
+    return;
+  }
+
+  if (btn) btn.textContent = remote ? `Updating to ${remote}…` : 'Updating…';
+  toast(remote ? `Update found: ${remote}` : 'Refreshing…');
+
   try {
     if (window.caches) {
       const keys = await caches.keys();
@@ -2776,6 +2802,7 @@ on('forceUpdateBtn', 'click', async () => {
   } catch (e) {
     console.warn('[DayFlow] cache clear failed', e);
   }
+
   // A plain reload can still be served from the HTTP cache in an installed
   // PWA, so navigate to a one-off URL instead. The marker is stripped on boot.
   const base = location.href.split('?')[0].split('#')[0];
@@ -3088,13 +3115,23 @@ function renderAll() {
 }
 
 /* Drop the ?fresh= marker left by a forced update so it doesn't linger. */
-if (location.search.includes('fresh=')) {
+const CAME_FROM_UPDATE = location.search.includes('fresh=');
+if (CAME_FROM_UPDATE) {
   try { history.replaceState(null, '', location.pathname); } catch (e) { /* non-fatal */ }
 }
 
 /* ======================= Init ======================= */
 applyTheme();
-switchView(state.view.current || 'today');
+// Always open on Today. The stored view was whatever happened to be current at
+// the last save — and since the Assistant persists its greeting the moment you
+// visit it, that made every relaunch land on the Assistant tab.
+state.view.current = 'today';
+switchView('today');
+
+// Confirm a forced update actually completed, so it isn't a silent no-op.
+if (CAME_FROM_UPDATE) {
+  setTimeout(() => toast(`Updated — you're on ${APP_VERSION}`, 5000), 700);
+}
 setInterval(() => { if (state.view.current === 'today') renderGrid(currentTodayDateStr()); }, 60000);
 
 /* ======================= Service worker ======================= */
