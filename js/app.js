@@ -36,6 +36,18 @@ const WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const WDFULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+/* ======================= Urgency ("when") =======================
+   Optional and always set after the fact — capture stays one tap + type, per
+   the app's core rule that dumping a task in never requires a decision. */
+const URGENCIES = [
+  { id: 'asap',  label: 'Do ASAP',       short: 'ASAP',  rank: 0 },
+  { id: 'today', label: 'Do today',      short: 'Today', rank: 1 },
+  { id: 'week',  label: 'Do this week',  short: 'Week',  rank: 2 },
+  { id: 'month', label: 'Do this month', short: 'Month', rank: 3 },
+];
+const URGENCY_BY_ID = Object.fromEntries(URGENCIES.map(u => [u.id, u]));
+function urgencyRank(u) { return URGENCY_BY_ID[u] ? URGENCY_BY_ID[u].rank : 4; }
+
 /* ======================= Icons =======================
    Inline stroke icons (24px grid, currentColor) so they inherit theme + accent
    colour and stay crisp at any size. No emoji, no icon font, no network. */
@@ -187,8 +199,8 @@ function renderColorSwatches(selectedId) {
 }
 
 /* ======================= Navigation ======================= */
-const views = ['today', 'week', 'habits', 'chat', 'stats'];
-const titles = { today: 'Today', week: 'Week', habits: 'Habits', chat: 'Assistant', stats: 'Stats' };
+const views = ['today', 'week', 'habits', 'routines', 'chores', 'chat', 'stats'];
+const titles = { today: 'Today', week: 'Week', habits: 'Habits', routines: 'Routines', chores: 'Chore Timer', chat: 'Assistant', stats: 'Stats' };
 
 function switchView(name) {
   state.view.current = name;
@@ -230,7 +242,8 @@ function renderToday() {
   const dayTasks = state.tasks.filter(t => t.date === ds);
   const untimed = dayTasks.filter(t => t.startMin == null && !t.done);
   const backlog = isToday ? state.tasks.filter(t => t.date === null && !t.done) : [];
-  const inboxTasks = [...untimed, ...backlog].sort((a, b) => a.createdAt - b.createdAt);
+  const inboxTasks = [...untimed, ...backlog]
+    .sort((a, b) => (urgencyRank(a.urgency) - urgencyRank(b.urgency)) || (a.createdAt - b.createdAt));
 
   const inboxList = document.getElementById('inboxList');
   inboxList.innerHTML = '';
@@ -284,7 +297,7 @@ function renderInboxItem(t) {
   el.className = 'inbox-item';
   el.dataset.id = t.id;
   el.innerHTML = `
-    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span><span class="place-hint">tap to place</span></div>
+    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : '<span class="place-hint">tap to place</span>'}</div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}<span>Delete</span></button>
   `;
   el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
@@ -318,9 +331,16 @@ function renderScheduleToggle(ds) {
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const isToday = ds === todayStr();
   const upcoming = isToday ? blocks.find(b => !b.done && b.startMin + b.durationMin > nowMin) : blocks.find(b => !b.done);
-  summaryEl.textContent = upcoming
-    ? `${blocks.length} block${blocks.length === 1 ? '' : 's'} · next ${upcoming.title} at ${minToLabel(upcoming.startMin)}`
-    : `${blocks.length} block${blocks.length === 1 ? '' : 's'} · all done`;
+  const n = `${blocks.length} block${blocks.length === 1 ? '' : 's'}`;
+  const unfinished = blocks.filter(b => !b.done).length;
+  if (upcoming) {
+    summaryEl.textContent = `${n} · next ${upcoming.title} at ${minToLabel(upcoming.startMin)}`;
+  } else if (unfinished) {
+    // Past their slot but never ticked off — "all done" would be a lie.
+    summaryEl.textContent = `${n} · ${unfinished} unfinished`;
+  } else {
+    summaryEl.textContent = `${n} · all done`;
+  }
 }
 
 document.getElementById('scheduleToggle').addEventListener('click', () => {
@@ -653,9 +673,14 @@ let activeBlock = null;
 function openBlockSheet(t, opts = {}) {
   activeBlock = t;
   document.getElementById('blockTitleInput').value = t.title;
-  document.getElementById('blockStartInput').value = minToTimeInput(t.startMin != null ? t.startMin : 9 * 60);
+  // Leave the time blank for untimed tasks. Pre-filling it meant that merely
+  // tagging urgency and saving would silently schedule the task at 9am and
+  // pull it out of the inbox.
+  document.getElementById('blockStartInput').value = t.startMin != null ? minToTimeInput(t.startMin) : '';
   currentDuration = t.durationMin || 30;
   updateDurLabel();
+  currentUrgency = t.urgency || null;
+  renderUrgencyOptions();
   document.getElementById('blockDoneBtn').textContent = t.done ? 'Mark not done' : 'Mark done';
   document.getElementById('blockUnscheduleBtn').style.display = t.startMin == null ? 'none' : 'flex';
   activeBlockOpts = opts;
@@ -663,6 +688,33 @@ function openBlockSheet(t, opts = {}) {
 }
 let activeBlockOpts = {};
 let currentDuration = 30;
+let currentUrgency = null;
+
+function renderUrgencyOptions() {
+  const wrap = document.getElementById('urgencyOptions');
+  if (!wrap.childElementCount) {
+    [...URGENCIES, { id: 'none', label: 'No rush' }].forEach(u => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'urgency-opt';
+      btn.dataset.urgency = u.id;
+      btn.innerHTML = `<span class="dot"></span><span>${u.label}</span>`;
+      btn.addEventListener('click', () => {
+        currentUrgency = (u.id === 'none' || currentUrgency === u.id) ? null : u.id;
+        paintUrgencyOptions();
+      });
+      wrap.appendChild(btn);
+    });
+  }
+  paintUrgencyOptions();
+}
+
+function paintUrgencyOptions() {
+  document.querySelectorAll('#urgencyOptions .urgency-opt').forEach(el => {
+    const id = el.dataset.urgency;
+    el.classList.toggle('active', id === currentUrgency || (id === 'none' && !currentUrgency));
+  });
+}
 function updateDurLabel() { document.getElementById('durLabel').textContent = currentDuration + ' min'; }
 
 document.getElementById('durMinus').addEventListener('click', () => { currentDuration = Math.max(5, currentDuration - 5); updateDurLabel(); });
@@ -676,8 +728,11 @@ document.getElementById('blockSaveBtn').addEventListener('click', () => {
   if (timeVal) {
     activeBlock.startMin = timeToMin(timeVal);
     if (!activeBlock.date) activeBlock.date = activeBlockOpts.forceDate || currentTodayDateStr();
+  } else {
+    activeBlock.startMin = null;   // cleared / never set: keep it in the inbox
   }
   activeBlock.durationMin = currentDuration;
+  activeBlock.urgency = currentUrgency;
   saveState();
   closeSheets();
   renderAll();
@@ -1228,9 +1283,10 @@ function fmtMinSec(totalSeconds) {
 }
 function routineTotalSeconds(r) { return r.steps.reduce((sum, s) => sum + s.seconds, 0); }
 
-function renderRoutinesSheet() {
+function renderRoutinesView() {
   const wrap = document.getElementById('routinesContainer');
   wrap.innerHTML = '';
+  document.getElementById('routinesCount').textContent = state.routines.length;
 
   const alarmCard = document.createElement('div');
   alarmCard.className = 'routine-card';
@@ -1246,10 +1302,7 @@ function renderRoutinesSheet() {
       <button class="pill-btn accent" data-act="alarm">Set up</button>
     </div>
   `;
-  alarmCard.querySelector('[data-act="alarm"]').addEventListener('click', () => {
-    closeSheets();
-    openAlarmSheet();
-  });
+  alarmCard.querySelector('[data-act="alarm"]').addEventListener('click', openAlarmSheet);
   wrap.appendChild(alarmCard);
 
   state.routines.forEach(r => {
@@ -1269,7 +1322,6 @@ function renderRoutinesSheet() {
     `;
     card.querySelector('[data-act="start"]').addEventListener('click', () => {
       if (!r.steps.length) { toast('Add a step first'); return; }
-      closeSheets();
       startRoutine(r);
     });
     card.querySelector('[data-act="edit"]').addEventListener('click', () => openRoutineEditSheet(r));
@@ -1277,7 +1329,6 @@ function renderRoutinesSheet() {
   });
 }
 
-document.getElementById('routinesBtn').addEventListener('click', () => { renderRoutinesSheet(); openSheet('routinesSheet'); });
 document.getElementById('newRoutineBtn').addEventListener('click', () => openRoutineEditSheet(null));
 
 let activeRoutine = null;
@@ -1418,8 +1469,7 @@ document.getElementById('routineSaveBtn').addEventListener('click', () => {
   }
   saveState();
   closeSheets();
-  renderRoutinesSheet();
-  openSheet('routinesSheet');
+  renderRoutinesView();
 });
 
 document.getElementById('routineDeleteBtn').addEventListener('click', () => {
@@ -1427,8 +1477,7 @@ document.getElementById('routineDeleteBtn').addEventListener('click', () => {
   state.routines = state.routines.filter(x => x.id !== activeRoutine.id);
   saveState();
   closeSheets();
-  renderRoutinesSheet();
-  openSheet('routinesSheet');
+  renderRoutinesView();
 });
 
 /* ---------- Routine run mode ---------- */
@@ -1538,7 +1587,7 @@ function choreAverage(c) {
 }
 function choreLast(c) { return c.sessions.length ? c.sessions[c.sessions.length - 1] : null; }
 
-function renderChoresSheet() {
+function renderChoresView() {
   const wrap = document.getElementById('choresContainer');
   wrap.innerHTML = '';
   state.chores.forEach(c => {
@@ -1556,20 +1605,16 @@ function renderChoresSheet() {
         <button class="chore-del-btn" data-act="del" aria-label="Delete">${icon('x', 16)}</button>
       </div>
     `;
-    card.querySelector('[data-act="start"]').addEventListener('click', () => {
-      closeSheets();
-      startChoreTimer(c);
-    });
+    card.querySelector('[data-act="start"]').addEventListener('click', () => startChoreTimer(c));
     card.querySelector('[data-act="del"]').addEventListener('click', () => {
       state.chores = state.chores.filter(x => x.id !== c.id);
       saveState();
-      renderChoresSheet();
+      renderChoresView();
     });
     wrap.appendChild(card);
   });
 }
 
-document.getElementById('choresBtn').addEventListener('click', () => { renderChoresSheet(); openSheet('choresSheet'); });
 
 document.getElementById('addChoreBtn').addEventListener('click', addChoreFromInput);
 document.getElementById('newChoreInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addChoreFromInput(); } });
@@ -1580,7 +1625,7 @@ function addChoreFromInput() {
   state.chores.push({ id: uid(), name, sessions: [], createdAt: Date.now() });
   input.value = '';
   saveState();
-  renderChoresSheet();
+  renderChoresView();
 }
 
 let choreRunning = null, choreStartTs = 0, choreInterval = null;
@@ -2126,12 +2171,31 @@ function assistantRespond(raw) {
     const found = state.routines.find(r => r.name.toLowerCase().includes(target)) ||
                   state.routines.find(r => target.includes(r.name.toLowerCase()));
     if (found) {
-      setTimeout(() => { closeSheets(); startRoutine(found); }, 400);
+      setTimeout(() => startRoutine(found), 400);
       return `Starting **${found.name}** — ${found.steps.length} steps, about ${fmtMinSec(routineTotalSeconds(found))}. Timer's coming up now.`;
     }
     if (state.routines.length) {
       return `I don't have a routine matching that. You've got: ${state.routines.map(r => r.name).join(', ')}.`;
     }
+  }
+
+  m = q.match(/^(?:mark|make|set|flag)\s+(.+?)\s+(?:as\s+)?(asap|urgent|today|this week|this month)$/);
+  if (m) {
+    const needle = m[1].replace(/^(the|my)\s+/, '').trim();
+    const key = { asap: 'asap', urgent: 'asap', today: 'today', 'this week': 'week', 'this month': 'month' }[m[2]];
+    const hit = state.tasks.find(t => !t.done && t.title.toLowerCase().includes(needle));
+    if (hit) {
+      hit.urgency = key;
+      saveState(); renderAll();
+      return `Flagged **${hit.title}** as ${URGENCY_BY_ID[key].label.toLowerCase()}.`;
+    }
+    return `I couldn't find an open task matching "${needle}".`;
+  }
+
+  if (/(what|show|any).*(asap|urgent)/.test(q)) {
+    const asap = state.tasks.filter(t => !t.done && t.urgency === 'asap');
+    if (!asap.length) return `Nothing flagged ASAP right now. Tap a task and pick "Do ASAP" if something needs to jump the queue.`;
+    return `**Flagged ASAP (${asap.length})**\n\n` + asap.map(t => `· ${t.title}`).join('\n');
   }
 
   m = q.match(/remember (?:that )?(.+)/);
@@ -2215,7 +2279,7 @@ function describeToday(ds) {
   }
   if (untimed.length) {
     out += `\nInbox (${untimed.length}, untimed):\n`;
-    untimed.slice(0, 6).forEach(t => { out += `· ${t.title}\n`; });
+    untimed.slice(0, 6).forEach(t => { out += `· ${t.title}${t.urgency ? ` [${URGENCY_BY_ID[t.urgency].short}]` : ''}\n`; });
     if (untimed.length > 6) out += `…and ${untimed.length - 6} more\n`;
   }
   lists.forEach(l => {
@@ -2229,6 +2293,12 @@ function describeToday(ds) {
 function suggestNext(ds) {
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const dayTasks = state.tasks.filter(t => t.date === ds && !t.done);
+
+  // Anything flagged ASAP jumps the queue, scheduled or not.
+  const asap = state.tasks.filter(t => !t.done && t.urgency === 'asap');
+  if (asap.length) {
+    return `You've flagged **${asap[0].title}** as ASAP${asap.length > 1 ? ` (plus ${asap.length - 1} more)` : ''} — that's the one to do now, before anything on the schedule.`;
+  }
   const current = dayTasks.find(t => t.startMin != null && t.startMin <= nowMin && t.startMin + t.durationMin > nowMin);
   if (current) return `Right now you're meant to be on **${current.title}** — it runs until ${minToLabel(current.startMin + current.durationMin)}.`;
 
@@ -2385,7 +2455,7 @@ function listReport(q) {
 }
 
 function assistantHelp() {
-  return `**Things I can do**\n\nAsk:\n· What's on today?\n· How am I doing this week?\n· What should I do next?\n· How long does washing dishes take?\n· Show my streaks / records\n· What do you know about me?\n\nTell:\n· add call the bank\n· add habit stretch\n· start morning routine\n· remember that I hate mornings\n\nI'm a simple matcher, not a chatbot with a language model — plain phrasing works best.`;
+  return `**Things I can do**\n\nAsk:\n· What's on today?\n· How am I doing this week?\n· What should I do next?\n· How long does washing dishes take?\n· Show my streaks / records\n· What do you know about me?\n\nTell:\n· add call the bank\n· add habit stretch\n· mark call the bank as asap\n· start morning routine\n· remember that I hate mornings\n\nI'm a simple matcher, not a chatbot with a language model — plain phrasing works best.`;
 }
 
 function assistantFallback(raw) {
@@ -2603,6 +2673,8 @@ function renderAll() {
   if (state.view.current === 'today') renderToday();
   if (state.view.current === 'week') renderWeek();
   if (state.view.current === 'habits') renderHabits();
+  if (state.view.current === 'routines') renderRoutinesView();
+  if (state.view.current === 'chores') renderChoresView();
   if (state.view.current === 'chat') renderChat();
   if (state.view.current === 'stats') renderStats();
 }

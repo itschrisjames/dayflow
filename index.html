@@ -23,8 +23,6 @@
     <button id="listsBtn" class="icon-btn" aria-label="Lists"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg></button>
     <h1 id="viewTitle">Today</h1>
     <div class="topbar-right">
-      <button id="routinesBtn" class="icon-btn" aria-label="Routines"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2.5 3.5 3.5L17 9.5"/><path d="M3.5 11.5v-1a4 4 0 0 1 4-4h13"/><path d="m7 21.5-3.5-3.5L7 14.5"/><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13"/></svg></button>
-      <button id="choresBtn" class="icon-btn" aria-label="Chore timer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h5"/><path d="M12 14v-4"/><circle cx="12" cy="14" r="7.75"/></svg></button>
       <button id="settingsBtn" class="icon-btn" aria-label="Settings"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M1.5 15h5M9.5 8h5M17.5 17h5"/></svg></button>
     </div>
   </header>
@@ -82,6 +80,25 @@
       <button id="addHabitBtn" class="add-row-btn">+ New habit</button>
     </section>
 
+
+    <!-- ROUTINES -->
+    <section id="view-routines" class="view">
+      <div class="section-label habits-label">Routines <span id="routinesCount" class="count-pill">0</span></div>
+      <div id="routinesContainer" class="view-pad"></div>
+      <button id="newRoutineBtn" class="add-row-btn">+ New routine</button>
+    </section>
+
+    <!-- CHORES -->
+    <section id="view-chores" class="view">
+      <div class="section-label habits-label">Chore Timer</div>
+      <p class="view-note">Time a chore once and DayFlow learns how long it really takes you.</p>
+      <div id="choresContainer" class="view-pad"></div>
+      <div class="list-add-row view-pad">
+        <input type="text" id="newChoreInput" placeholder="Add a chore (e.g. Washing dishes)…" maxlength="60">
+        <button type="button" id="addChoreBtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+    </section>
+
     <!-- CHAT -->
     <section id="view-chat" class="view">
       <div id="chatLog" class="chat-log"></div>
@@ -123,6 +140,8 @@
     <button class="tab active" data-view="today"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg></span><span>Today</span></button>
     <button class="tab" data-view="week"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/></svg></span><span>Week</span></button>
     <button class="tab" data-view="habits"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9.5"/></svg></span><span>Habits</span></button>
+    <button class="tab" data-view="routines"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2.5 3.5 3.5L17 9.5"/><path d="M3.5 11.5v-1a4 4 0 0 1 4-4h13"/><path d="m7 21.5-3.5-3.5L7 14.5"/><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13"/></svg></span><span>Routines</span></button>
+    <button class="tab" data-view="chores"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h5"/><path d="M12 14v-4"/><circle cx="12" cy="14" r="7.75"/></svg></span><span>Chores</span></button>
     <button class="tab" data-view="chat"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l1.7 4.8 4.8 1.7-4.8 1.7L12 16.2l-1.7-4.8L5.5 9.7l4.8-1.7L12 3.2Z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg></span><span>Assistant</span></button>
     <button class="tab" data-view="stats"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M6.5 21v-6M12 21V6M17.5 21v-9"/></svg></span><span>Stats</span></button>
   </nav>
@@ -136,6 +155,10 @@
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <input id="blockTitleInput" type="text" class="sheet-input" maxlength="140">
+    <div class="sheet-row urgency-row">
+      <label>When</label>
+      <div class="urgency-options" id="urgencyOptions"></div>
+    </div>
     <div class="sheet-row">
       <label>Start</label>
       <input id="blockStartInput" type="time" step="900">
@@ -192,17 +215,6 @@
       <button id="newListBtn" class="pill-btn accent small">+ New</button>
     </div>
     <div id="listsContainer"></div>
-  </div>
-</div>
-
-<div id="routinesSheet" class="sheet sheet-tall" hidden>
-  <div class="sheet-handle"></div>
-  <div class="sheet-body">
-    <div class="sheet-header-row">
-      <h2>Routines</h2>
-      <button id="newRoutineBtn" class="pill-btn accent small">+ New</button>
-    </div>
-    <div id="routinesContainer"></div>
   </div>
 </div>
 
@@ -295,21 +307,6 @@
     <div class="run-done-title">Routine complete</div>
     <div class="run-done-time" id="runDoneTime"></div>
     <button id="runFinishBtn" class="primary-btn">Done</button>
-  </div>
-</div>
-
-<div id="choresSheet" class="sheet sheet-tall" hidden>
-  <div class="sheet-handle"></div>
-  <div class="sheet-body">
-    <div class="sheet-header-row">
-      <h2>Chore Timer</h2>
-    </div>
-    <p class="settings-note" style="margin:0 0 14px;text-align:left;">Time a task once, and DayFlow learns how long it usually takes you — so next time you know what you're actually signing up for.</p>
-    <div id="choresContainer"></div>
-    <div class="list-add-row" style="margin-top:4px;">
-      <input type="text" id="newChoreInput" placeholder="Add a chore (e.g. Washing dishes)…" maxlength="60">
-      <button type="button" id="addChoreBtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
-    </div>
   </div>
 </div>
 

@@ -761,3 +761,64 @@ button { font-family: inherit; }
 .habit-practice-btn { display: flex; align-items: center; justify-content: center; }
 .habit-practice-btn .ico { margin-left: 1px; }
 .run-done-check .ico { width: 40px; height: 40px; }
+
+/* ---------- Urgency / "when" tagging ---------- */
+.urgency-row { flex-direction: column; align-items: stretch; gap: 9px; }
+.urgency-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.urgency-opt {
+  border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text-dim);
+  border-radius: 10px; padding: 11px 8px; font-size: 13px; font-weight: 600;
+  min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.urgency-opt .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .55; }
+.urgency-opt.active { color: var(--accent-text); border-color: transparent; }
+.urgency-opt.active .dot { opacity: 1; background: currentColor; }
+.urgency-opt.active[data-urgency="asap"]  { background: var(--danger); }
+.urgency-opt.active[data-urgency="today"] { background: var(--accent); }
+.urgency-opt.active[data-urgency="week"]  { background: var(--text-dim); }
+.urgency-opt.active[data-urgency="month"] { background: var(--text-faint); }
+.urgency-opt.active[data-urgency="none"]  { background: var(--text-faint); }
+
+/* Tag shown on an inbox row */
+.u-tag {
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  padding: 3px 7px; border-radius: 6px; flex-shrink: 0; white-space: nowrap;
+}
+.u-tag.asap  { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.u-tag.today { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.u-tag.week  { background: var(--bg-sunken); color: var(--text-dim); }
+.u-tag.month { background: var(--bg-sunken); color: var(--text-faint); }
+.inbox-item .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Urgency group headers in the inbox */
+.inbox-group-label {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-faint); padding: 8px 4px 2px;
+}
+.inbox-group-label:first-child { padding-top: 2px; }
+.inbox-group-label.asap { color: var(--danger); }
+
+/* ---------- Routines / Chores as full views ---------- */
+.view-pad { padding: 0 12px; }
+.view-note {
+  font-size: 12.5px; color: var(--text-faint); margin: 0 0 10px; padding: 0 16px; line-height: 1.45;
+}
+#view-routines .routine-card, #view-chores .chore-card {
+  background: var(--bg-elev); border: 1px solid var(--border);
+}
+#choresContainer:empty::after {
+  content: "No chores yet — add one below to start timing it.";
+  display: block; color: var(--text-faint); font-size: 13px; padding: 6px 4px 12px;
+}
+#view-chores .list-add-row { margin-top: 4px; }
+#view-chores .list-add-row input { height: 44px; font-size: 14.5px; }
+#view-chores .list-add-row button { width: 44px; height: 44px; }
+
+/* ---------- 7-slot tab bar ---------- */
+.tab { padding: 7px 1px 6px; font-size: 9.5px; gap: 3px; letter-spacing: -0.01em; }
+.tab-icon .ico { width: 20px; height: 20px; }
+.tab-icon { height: 20px; }
+@media (max-width: 360px) {
+  .tab { font-size: 8.5px; }
+  .tab-icon .ico { width: 19px; height: 19px; }
+}
