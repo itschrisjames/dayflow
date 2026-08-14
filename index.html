@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>DayFlow</title>
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17171a" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DayFlow">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===== Header ===== -->
+  <header class="topbar">
+    <button id="listsBtn" class="icon-btn" aria-label="Lists">☰</button>
+    <h1 id="viewTitle">Today</h1>
+    <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙</button>
+  </header>
+
+  <!-- ===== Views ===== -->
+  <main id="views">
+
+    <!-- TODAY -->
+    <section id="view-today" class="view active">
+      <div class="day-nav">
+        <button id="todayPrev" class="chevron">‹</button>
+        <div id="todayDateLabel" class="day-nav-label"></div>
+        <button id="todayNext" class="chevron">›</button>
+      </div>
+
+      <div id="inboxSection" class="inbox-section">
+        <div class="section-label">Inbox <span id="inboxCount" class="count-pill">0</span></div>
+        <div id="inboxList" class="inbox-list"></div>
+      </div>
+
+      <div id="checklistTodaySection" class="checklist-today-section" hidden>
+        <div class="section-label">Today's Lists</div>
+        <div id="checklistTodayList"></div>
+      </div>
+
+      <div class="grid-scroll" id="gridScroll">
+        <div class="grid-wrap" id="gridWrap">
+          <div class="hour-lines" id="hourLines"></div>
+          <div class="blocks-layer" id="blocksLayer"></div>
+          <div class="now-line" id="nowLine"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WEEK -->
+    <section id="view-week" class="view">
+      <div class="day-nav">
+        <button id="weekPrev" class="chevron">‹</button>
+        <div id="weekRangeLabel" class="day-nav-label"></div>
+        <button id="weekNext" class="chevron">›</button>
+      </div>
+      <div class="week-grid" id="weekGrid"></div>
+    </section>
+
+    <!-- HABITS -->
+    <section id="view-habits" class="view">
+      <div class="section-label habits-label">Habits <span id="habitsCount" class="count-pill">0</span></div>
+      <div id="habitsList" class="habits-list"></div>
+      <button id="addHabitBtn" class="add-row-btn">+ New habit</button>
+    </section>
+
+    <!-- STATS -->
+    <section id="view-stats" class="view">
+      <div class="stats-scroll">
+        <div class="stat-cards" id="statCards"></div>
+        <div class="stat-block">
+          <div class="section-label">Last 14 days</div>
+          <svg id="statsChart" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="stat-block">
+          <div class="section-label">Streaks</div>
+          <div id="streakTable"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== Quick Add (always visible) ===== -->
+  <form id="quickAddForm" class="quick-add">
+    <input id="quickAddInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="140">
+    <button type="submit" class="quick-add-btn" aria-label="Add">＋</button>
+  </form>
+
+  <!-- ===== Bottom Tab Bar ===== -->
+  <nav class="tabbar">
+    <button class="tab active" data-view="today"><span class="tab-icon">☀</span><span>Today</span></button>
+    <button class="tab" data-view="week"><span class="tab-icon">▦</span><span>Week</span></button>
+    <button class="tab" data-view="habits"><span class="tab-icon">◍</span><span>Habits</span></button>
+    <button class="tab" data-view="stats"><span class="tab-icon">▲</span><span>Stats</span></button>
+  </nav>
+
+</div>
+
+<!-- ===== Sheets / Overlays ===== -->
+<div id="overlayBackdrop" class="overlay-backdrop" hidden></div>
+
+<div id="blockSheet" class="sheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <input id="blockTitleInput" type="text" class="sheet-input" maxlength="140">
+    <div class="sheet-row">
+      <label>Start</label>
+      <input id="blockStartInput" type="time" step="900">
+    </div>
+    <div class="sheet-row">
+      <label>Duration</label>
+      <div class="stepper">
+        <button type="button" id="durMinus" class="stepper-btn">−</button>
+        <span id="durLabel">30 min</span>
+        <button type="button" id="durPlus" class="stepper-btn">+</button>
+      </div>
+    </div>
+    <div class="sheet-actions">
+      <button id="blockDoneBtn" class="pill-btn accent">Mark done</button>
+      <button id="blockUnscheduleBtn" class="pill-btn">Unschedule</button>
+      <button id="blockDeleteBtn" class="pill-btn danger">Delete</button>
+    </div>
+    <button id="blockSaveBtn" class="primary-btn">Save</button>
+  </div>
+</div>
+
+<div id="habitSheet" class="sheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <input id="habitNameInput" type="text" class="sheet-input" placeholder="Habit name" maxlength="60">
+    <div class="sheet-row freq-row">
+      <label>Frequency</label>
+      <div class="freq-options" id="freqOptions">
+        <button type="button" class="freq-opt active" data-freq="daily">Daily</button>
+        <button type="button" class="freq-opt" data-freq="weekly">× per week</button>
+      </div>
+    </div>
+    <div class="sheet-row" id="freqCountRow" hidden>
+      <label>Times / week</label>
+      <div class="stepper">
+        <button type="button" id="freqMinus" class="stepper-btn">−</button>
+        <span id="freqCountLabel">3</span>
+        <button type="button" id="freqPlus" class="stepper-btn">+</button>
+      </div>
+    </div>
+    <div class="sheet-actions">
+      <button id="habitDeleteBtn" class="pill-btn danger" hidden>Delete</button>
+    </div>
+    <button id="habitSaveBtn" class="primary-btn">Save</button>
+  </div>
+</div>
+
+<div id="listsSheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sheet-header-row">
+      <h2>Lists</h2>
+      <button id="newListBtn" class="pill-btn accent small">+ New</button>
+    </div>
+    <div id="listsContainer"></div>
+  </div>
+</div>
+
+<div id="settingsSheet" class="sheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Settings</h2>
+    <div class="sheet-row">
+      <label>Appearance</label>
+      <div class="freq-options" id="themeOptions">
+        <button type="button" class="freq-opt" data-theme="auto">Auto</button>
+        <button type="button" class="freq-opt" data-theme="light">Light</button>
+        <button type="button" class="freq-opt" data-theme="dark">Dark</button>
+      </div>
+    </div>
+    <div class="sheet-actions">
+      <button id="exportBtn" class="pill-btn accent">Export JSON</button>
+      <label class="pill-btn" for="importFile">Import JSON</label>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+    <div class="sheet-actions">
+      <button id="resetBtn" class="pill-btn danger">Erase all data</button>
+    </div>
+    <p class="settings-note">All data stays on this device. Export regularly to keep a backup.</p>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

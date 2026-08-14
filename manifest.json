@@ -1,0 +1,16 @@
+{
+  "name": "DayFlow",
+  "short_name": "DayFlow",
+  "description": "Time-blocked daily planning, habit streaks, and life lists — all offline, all local.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#faf9f6",
+  "theme_color": "#faf9f6",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-180-maskable.png", "sizes": "180x180", "type": "image/png", "purpose": "maskable" }
+  ]
+}
