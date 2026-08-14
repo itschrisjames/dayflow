@@ -324,9 +324,17 @@ function renderInboxItem(t) {
   const el = document.createElement('div');
   el.className = 'inbox-item';
   el.dataset.id = t.id;
-  el.innerHTML = `<span class="grip">⠿</span><span class="title">${escapeHtml(t.title)}</span><span class="place-hint">tap to place</span>`;
+  el.innerHTML = `
+    <div class="swipe-content"><span class="grip">⠿</span><span class="title">${escapeHtml(t.title)}</span><span class="place-hint">tap to place</span></div>
+    <button type="button" class="swipe-delete-btn" aria-label="Delete task">Delete</button>
+  `;
+  el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    deleteTaskById(t.id);
+  });
   el.addEventListener('click', (e) => {
     if (el._wasDragged) { el._wasDragged = false; return; }
+    if (el._swipeOpen) { closeAnyOpenSwipe(); return; }
     openBlockSheet(t, { forceDate: currentTodayDateStr() });
   });
   makeInboxDraggable(el, t);
@@ -370,6 +378,17 @@ function gridYToMin(y) {
   return min;
 }
 
+// Maps a viewport point to a grid minute using the grid's own geometry,
+// rather than hit-testing elementFromPoint — a dragged item's own ghost or
+// an existing block sitting on that slot would otherwise shadow the drop
+// target and silently swallow the drop.
+function pointToGridMin(clientX, clientY) {
+  const gridWrap = document.getElementById('gridWrap');
+  const rect = gridWrap.getBoundingClientRect();
+  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+  return gridYToMin(clientY - rect.top);
+}
+
 function renderGrid(ds) {
   const layer = document.getElementById('blocksLayer');
   layer.innerHTML = '';
@@ -411,27 +430,84 @@ function renderBlock(t) {
   const height = Math.max(22, t.durationMin * PX_PER_MIN);
   el.style.top = top + 'px';
   el.style.height = height + 'px';
-  el.innerHTML = `<div class="block-title">${escapeHtml(t.title)}</div><div class="block-time">${minToLabel(t.startMin)} · ${t.durationMin}m</div>`;
+  el.innerHTML = `
+    <div class="swipe-content"><div class="block-title">${escapeHtml(t.title)}</div><div class="block-time">${minToLabel(t.startMin)} · ${t.durationMin}m</div></div>
+    <button type="button" class="swipe-delete-btn" aria-label="Delete task">🗑</button>
+  `;
+  el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    deleteTaskById(t.id);
+  });
   makeBlockDraggable(el, t);
   el.addEventListener('click', (e) => {
     if (el._wasDragged) { el._wasDragged = false; return; }
+    if (el._swipeOpen) { closeAnyOpenSwipe(); return; }
     openBlockSheet(t);
   });
   return el;
 }
 
+/* ---------- Swipe-to-delete (shared) ---------- */
+let openSwipeRow = null;
+function closeSwipeRowObj(row) {
+  row.content.style.transition = '';
+  row.content.style.transform = '';
+  row.el._swipeOpen = false;
+}
+function openSwipeRowObj(el, content, width) {
+  if (openSwipeRow && openSwipeRow.el !== el) closeSwipeRowObj(openSwipeRow);
+  content.style.transition = '';
+  content.style.transform = `translateX(-${width}px)`;
+  el._swipeOpen = true;
+  openSwipeRow = { el, content };
+}
+function closeAnyOpenSwipe() {
+  if (openSwipeRow) { closeSwipeRowObj(openSwipeRow); openSwipeRow = null; }
+}
+document.addEventListener('pointerdown', (e) => {
+  if (openSwipeRow && !openSwipeRow.el.contains(e.target)) closeAnyOpenSwipe();
+}, true);
+
+function deleteTaskById(id) {
+  closeAnyOpenSwipe();
+  state.tasks = state.tasks.filter(x => x.id !== id);
+  saveState();
+  renderAll();
+  toast('Task deleted');
+}
+
 let pendingPlace = null;
 
-/* ---------- Drag: inbox item -> grid ---------- */
+/* ---------- Drag: inbox item -> grid, or swipe left to delete ---------- */
+const SWIPE_REVEAL = 84;
+const SWIPE_AUTO_DELETE = 150;
+
 function makeInboxDraggable(el, t) {
-  let dragging = false, startY = 0, ghost = null, moved = false;
+  const content = el.querySelector('.swipe-content');
+  let axis = null, dragging = false, startX = 0, startY = 0, ghost = null, baseX = 0;
   el.addEventListener('pointerdown', (e) => {
+    axis = null;
+    dragging = false;
+    startX = e.clientX;
     startY = e.clientY;
-    moved = false;
+    baseX = el._swipeOpen ? -SWIPE_REVEAL : 0;
     const onMove = (ev) => {
-      if (!dragging && Math.abs(ev.clientY - startY) > 8) {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (axis === null) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        if (axis === 'x') closeAnyOpenSwipe();
+      }
+      if (axis === 'x') {
+        let nx = Math.min(0, Math.max(-SWIPE_REVEAL - 40, baseX + dx));
+        content.style.transition = 'none';
+        content.style.transform = `translateX(${nx}px)`;
+        el._pendingSwipeX = nx;
+        return;
+      }
+      // vertical: existing drag-to-place-on-grid behavior
+      if (!dragging) {
         dragging = true;
-        moved = true;
         el.classList.add('dragging');
         ghost = el.cloneNode(true);
         ghost.style.position = 'fixed';
@@ -442,7 +518,6 @@ function makeInboxDraggable(el, t) {
         document.body.appendChild(ghost);
       }
       if (dragging) {
-        ghost.style.left = (e.clientX - 60) + 'px' || '';
         ghost.style.left = (ev.clientX - ghost.offsetWidth / 2) + 'px';
         ghost.style.top = (ev.clientY - 20) + 'px';
         highlightDropTarget(ev.clientX, ev.clientY);
@@ -451,22 +526,30 @@ function makeInboxDraggable(el, t) {
     const onUp = (ev) => {
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
-      el.classList.remove('dragging');
-      clearDropHighlights();
-      if (dragging) {
+      if (axis === 'x') {
+        const nx = el._pendingSwipeX || 0;
+        if (nx <= -SWIPE_AUTO_DELETE) {
+          deleteTaskById(t.id);
+          return;
+        }
+        if (nx <= -SWIPE_REVEAL / 2) openSwipeRowObj(el, content, SWIPE_REVEAL);
+        else closeSwipeRowObj({ el, content });
         el._wasDragged = true;
-        if (ghost) ghost.remove();
-        const target = document.elementFromPoint(ev.clientX, ev.clientY);
-        const row = target && target.closest('.hour-row');
-        if (row) {
-          const rect = row.getBoundingClientRect();
-          const offsetY = ev.clientY - rect.top;
-          const min = gridYToMin((Number(row.dataset.min) - GRID_START_MIN) * PX_PER_MIN + offsetY);
-          placeTask(t, currentTodayDateStr(), min);
-          toast('Placed on grid');
+      } else if (axis === 'y') {
+        el.classList.remove('dragging');
+        clearDropHighlights();
+        if (dragging) {
+          el._wasDragged = true;
+          if (ghost) ghost.remove();
+          const min = pointToGridMin(ev.clientX, ev.clientY);
+          if (min != null) {
+            placeTask(t, currentTodayDateStr(), min);
+            toast('Placed on grid');
+          }
         }
       }
       dragging = false;
+      axis = null;
     };
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
@@ -485,15 +568,32 @@ function clearDropHighlights() {
 
 /* ---------- Drag: block reposition within grid ---------- */
 function makeBlockDraggable(el, t) {
-  let dragging = false, startY = 0, origTop = 0, moved = false;
+  const content = el.querySelector('.swipe-content');
+  const BLOCK_REVEAL = 60;
+  let axis = null, dragging = false, startX = 0, startY = 0, origTop = 0, baseX = 0;
   el.addEventListener('pointerdown', (e) => {
     e.stopPropagation();
+    axis = null;
+    dragging = false;
+    startX = e.clientX;
     startY = e.clientY;
     origTop = parseFloat(el.style.top);
-    moved = false;
+    baseX = el._swipeOpen ? -BLOCK_REVEAL : 0;
     const onMove = (ev) => {
-      const dy = ev.clientY - startY;
-      if (!dragging && Math.abs(dy) > 6) { dragging = true; moved = true; el.classList.add('dragging'); }
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (axis === null) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        if (axis === 'x') closeAnyOpenSwipe();
+      }
+      if (axis === 'x') {
+        let nx = Math.min(0, Math.max(-BLOCK_REVEAL - 30, baseX + dx));
+        content.style.transition = 'none';
+        content.style.transform = `translateX(${nx}px)`;
+        el._pendingSwipeX = nx;
+        return;
+      }
+      if (!dragging && Math.abs(dy) > 6) { dragging = true; el.classList.add('dragging'); }
       if (dragging) {
         let newTop = origTop + dy;
         newTop = Math.max(0, newTop);
@@ -503,16 +603,28 @@ function makeBlockDraggable(el, t) {
     const onUp = (ev) => {
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
-      if (dragging) {
+      if (axis === 'x') {
+        const nx = el._pendingSwipeX || 0;
+        if (nx <= -(BLOCK_REVEAL + 60)) {
+          deleteTaskById(t.id);
+          return;
+        }
+        if (nx <= -BLOCK_REVEAL / 2) openSwipeRowObj(el, content, BLOCK_REVEAL);
+        else closeSwipeRowObj({ el, content });
         el._wasDragged = true;
-        el.classList.remove('dragging');
-        const newTop = parseFloat(el.style.top);
-        const min = gridYToMin(newTop);
-        t.startMin = min;
-        saveState();
-        renderAll();
+      } else if (axis === 'y') {
+        if (dragging) {
+          el._wasDragged = true;
+          el.classList.remove('dragging');
+          const newTop = parseFloat(el.style.top);
+          const min = gridYToMin(newTop);
+          t.startMin = min;
+          saveState();
+          renderAll();
+        }
       }
       dragging = false;
+      axis = null;
     };
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
