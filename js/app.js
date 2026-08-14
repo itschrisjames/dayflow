@@ -15,7 +15,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v13';
 const APP_BUILT = '2026-08-14';
 
 /* ======================= Storage ======================= */
@@ -379,12 +379,18 @@ function renderInboxItem(t) {
   el.className = 'inbox-item';
   el.dataset.id = t.id;
   el.innerHTML = `
-    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : '<span class="place-hint">tap to place</span>'}</div>
+    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : ''}${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : (t.urgency ? '' : '<span class="place-hint">tap to place</span>')}</div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}<span>Delete</span></button>
   `;
   el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     deleteTaskById(t.id);
+  });
+  const chip = el.querySelector('.time-chip');
+  if (chip) chip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    placeTask(t, t.date || currentTodayDateStr(), t.proposedMin);
+    toast(`Scheduled for ${minToLabel(t.startMin)}`);
   });
   el.addEventListener('click', (e) => {
     if (el._wasDragged) { el._wasDragged = false; return; }
@@ -745,6 +751,7 @@ function makeBlockDraggable(el, t) {
 function placeTask(t, ds, min) {
   t.date = ds;
   t.startMin = min;
+  delete t.proposedMin;      // the suggestion has been acted on
   if (!t.durationMin) t.durationMin = 30;
   saveState();
   renderAll();
@@ -758,7 +765,9 @@ function openBlockSheet(t, opts = {}) {
   // Leave the time blank for untimed tasks. Pre-filling it meant that merely
   // tagging urgency and saving would silently schedule the task at 9am and
   // pull it out of the inbox.
-  document.getElementById('blockStartInput').value = t.startMin != null ? minToTimeInput(t.startMin) : '';
+  document.getElementById('blockStartInput').value =
+    t.startMin != null ? minToTimeInput(t.startMin)
+    : (t.proposedMin != null ? minToTimeInput(t.proposedMin) : '');
   currentDuration = t.durationMin || 30;
   updateDurLabel();
   currentUrgency = t.urgency || null;
@@ -797,10 +806,35 @@ function paintUrgencyOptions() {
     el.classList.toggle('active', id === currentUrgency || (id === 'none' && !currentUrgency));
   });
 }
-function updateDurLabel() { document.getElementById('durLabel').textContent = currentDuration + ' min'; }
+function updateDurLabel() {
+  const b = document.getElementById('blockDurBtn');
+  if (b) b.textContent = fmtDuration(currentDuration);
+}
 
-on('durMinus', 'click', () => { currentDuration = Math.max(5, currentDuration - 5); updateDurLabel(); });
-on('durPlus', 'click', () => { currentDuration = Math.min(480, currentDuration + 5); updateDurLabel(); });
+/* Duration is a scrollable hour/minute wheel — nudging a two-hour block five
+   minutes at a time was the slowest control in the app. */
+const TASK_HOURS = Array.from({ length: 13 }, (_, i) => i);          // 0–12 hr
+const TASK_MINS = Array.from({ length: 12 }, (_, i) => i * 5);       // 0–55 in 5s
+let taskHourCtrl = null, taskMinCtrl = null;
+
+function openTaskDurationPicker() {
+  const h = Math.floor(currentDuration / 60);
+  const m = Math.round((currentDuration % 60) / 5) * 5;
+  openSheet('taskDurationSheet');                 // must be visible to scroll
+  taskHourCtrl = buildWheelColumn(document.getElementById('taskHourCol'), TASK_HOURS, v => String(v), Math.min(h, 12));
+  taskMinCtrl = buildWheelColumn(document.getElementById('taskMinCol'), TASK_MINS, v => pad2(v), Math.min(m, 55));
+}
+
+on('blockDurBtn', 'click', openTaskDurationPicker);
+
+on('taskDurationSetBtn', 'click', () => {
+  const h = taskHourCtrl ? taskHourCtrl.getValue() : 0;
+  const m = taskMinCtrl ? taskMinCtrl.getValue() : 0;
+  currentDuration = Math.max(5, h * 60 + m);
+  updateDurLabel();
+  const sheet = document.getElementById('taskDurationSheet');
+  if (sheet) sheet.hidden = true;
+});
 
 on('blockSaveBtn', 'click', () => {
   if (!activeBlock) return;
@@ -809,6 +843,7 @@ on('blockSaveBtn', 'click', () => {
   const timeVal = document.getElementById('blockStartInput').value;
   if (timeVal) {
     activeBlock.startMin = timeToMin(timeVal);
+    delete activeBlock.proposedMin;
     if (!activeBlock.date) activeBlock.date = activeBlockOpts.forceDate || currentTodayDateStr();
   } else {
     activeBlock.startMin = null;   // cleared / never set: keep it in the inbox
@@ -892,14 +927,14 @@ on('quickAddForm', 'submit', (e) => {
   const dateForNew = state.view.current === 'today' ? currentTodayDateStr() : null;
 
   if (parsed) {
-    // A stated time means it belongs on today's schedule, not the inbox.
+    // Capture stays capture: a stated time is remembered as a suggestion, but
+    // the task still lands in the inbox so nothing is scheduled behind your back.
     state.tasks.push({ id: uid(), title: parsed.title, date: dateForNew || todayStr(),
-      startMin: parsed.startMin, durationMin: 30, done: false, createdAt: Date.now() });
+      startMin: null, proposedMin: parsed.startMin, durationMin: 30, done: false, createdAt: Date.now() });
     input.value = '';
     saveState();
-    if (!state.settings.showSchedule) { state.settings.showSchedule = true; saveState(); }
     renderAll();
-    toast(`Scheduled for ${minToLabel(parsed.startMin)}`);
+    toast(`In your inbox — tap ${minToLabel(parsed.startMin)} to schedule it`, 3000);
     return;
   }
 
@@ -1494,6 +1529,12 @@ function fmtMinSec(totalSeconds) {
   const m = Math.floor(totalSeconds / 60), s = totalSeconds % 60;
   return `${m}:${pad2(s)}`;
 }
+function fmtDuration(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (!h) return `${m} min`;
+  return m ? `${h} hr ${m} min` : `${h} hr`;
+}
+
 function routineTotalSeconds(r) { return r.steps.reduce((sum, s) => sum + s.seconds, 0); }
 
 function renderRoutinesView() {
@@ -2422,10 +2463,10 @@ function assistantRespond(raw) {
     if (title) {
       const parsed = extractTimeFromTitle(title);
       if (parsed) {
-        state.tasks.push({ id: uid(), title: parsed.title, date: ds, startMin: parsed.startMin,
-          durationMin: 30, done: false, createdAt: Date.now() });
+        state.tasks.push({ id: uid(), title: parsed.title, date: ds, startMin: null,
+          proposedMin: parsed.startMin, durationMin: 30, done: false, createdAt: Date.now() });
         saveState(); renderAll();
-        return `Scheduled **${parsed.title}** for today at ${minToLabel(parsed.startMin)}.`;
+        return `Added **${parsed.title}** to your inbox with ${minToLabel(parsed.startMin)} noted. Tap that time on the row to put it on the schedule.`;
       }
       state.tasks.push({ id: uid(), title, date: ds, startMin: null, durationMin: 30, done: false, createdAt: Date.now() });
       saveState(); renderAll();

@@ -165,11 +165,8 @@
     </div>
     <div class="sheet-row">
       <label>Duration</label>
-      <div class="stepper">
-        <button type="button" id="durMinus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
-        <span id="durLabel">30 min</span>
-        <button type="button" id="durPlus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
-      </div>
+      <button type="button" id="blockDurBtn" class="dur-picker-btn">30 min</button>
+    </div>
     </div>
     <div class="sheet-actions">
       <button id="blockDoneBtn" class="pill-btn accent">Mark done</button>
@@ -275,6 +272,21 @@
     <button id="alarmCreateBtn" class="primary-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="m4.5 3-2.2 2.2M19.5 3l2.2 2.2"/></svg><span>Create 3 alarms</span></button>
     <div class="section-label" style="padding-left:0;margin-top:16px;">Saved stacks</div>
     <div id="alarmStackList"></div>
+  </div>
+</div>
+
+<div id="taskDurationSheet" class="sheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>How long?</h2>
+    <div class="wheel-picker">
+      <div class="wheel-highlight"></div>
+      <div class="wheel-col" id="taskHourCol"></div>
+      <div class="wheel-unit">hr</div>
+      <div class="wheel-col" id="taskMinCol"></div>
+      <div class="wheel-unit">min</div>
+    </div>
+    <button id="taskDurationSetBtn" class="primary-btn">Set</button>
   </div>
 </div>
 
