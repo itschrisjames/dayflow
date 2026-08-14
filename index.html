@@ -46,11 +46,17 @@
       </div>
 
       <div id="checklistTodaySection" class="checklist-today-section" hidden>
-        <div class="section-label">Today's Lists</div>
+        <div class="section-label">To Do List</div>
         <div id="checklistTodayList"></div>
       </div>
 
-      <div class="grid-scroll" id="gridScroll">
+      <button type="button" id="scheduleToggle" class="schedule-toggle">
+        <span class="st-label">Schedule</span>
+        <span class="st-summary" id="scheduleSummary"></span>
+        <span class="st-chev" id="scheduleChev">▾</span>
+      </button>
+
+      <div class="grid-scroll" id="gridScroll" hidden>
         <div class="grid-wrap" id="gridWrap">
           <div class="hour-lines" id="hourLines"></div>
           <div class="blocks-layer" id="blocksLayer"></div>
@@ -74,6 +80,12 @@
       <div class="section-label habits-label">Habits <span id="habitsCount" class="count-pill">0</span></div>
       <div id="habitsList" class="habits-list"></div>
       <button id="addHabitBtn" class="add-row-btn">+ New habit</button>
+    </section>
+
+    <!-- CHAT -->
+    <section id="view-chat" class="view">
+      <div id="chatLog" class="chat-log"></div>
+      <div id="chatChips" class="chat-chips"></div>
     </section>
 
     <!-- STATS -->
@@ -101,7 +113,8 @@
   <!-- ===== Quick Add (always visible) ===== -->
   <form id="quickAddForm" class="quick-add">
     <button type="button" id="quickAddModeBtn" class="quick-add-mode" aria-label="Switch between task and habit">✓</button>
-    <input id="quickAddInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="140">
+    <button type="button" id="micBtn" class="quick-add-mic" aria-label="Dictate">🎤</button>
+    <input id="quickAddInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="400">
     <button type="submit" class="quick-add-btn" aria-label="Add">＋</button>
   </form>
 
@@ -110,6 +123,7 @@
     <button class="tab active" data-view="today"><span class="tab-icon">☀</span><span>Today</span></button>
     <button class="tab" data-view="week"><span class="tab-icon">▦</span><span>Week</span></button>
     <button class="tab" data-view="habits"><span class="tab-icon">◍</span><span>Habits</span></button>
+    <button class="tab" data-view="chat"><span class="tab-icon">✦</span><span>Chat</span></button>
     <button class="tab" data-view="stats"><span class="tab-icon">▲</span><span>Stats</span></button>
   </nav>
 
@@ -163,6 +177,7 @@
       </div>
     </div>
     <div class="sheet-actions">
+      <button id="habitClearRecordsBtn" class="pill-btn" hidden>Clear records</button>
       <button id="habitDeleteBtn" class="pill-btn danger" hidden>Delete</button>
     </div>
     <button id="habitSaveBtn" class="primary-btn">Save</button>
@@ -213,6 +228,28 @@
       <button id="routineDeleteBtn" class="pill-btn danger" hidden>Delete routine</button>
     </div>
     <button id="routineSaveBtn" class="primary-btn">Save routine</button>
+  </div>
+</div>
+
+<div id="alarmSheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sheet-header-row">
+      <h2>Triple Alarm</h2>
+    </div>
+    <p class="settings-note" style="margin:0 0 10px;text-align:left;">Pick one time — DayFlow builds three alarms, two minutes apart, so the snooze-through problem gets three chances instead of one.</p>
+    <input id="alarmLabelInput" type="text" class="sheet-input" placeholder="Label (e.g. Wind down)" maxlength="40">
+    <div class="wheel-picker">
+      <div class="wheel-highlight"></div>
+      <div class="wheel-col" id="alarmHourCol"></div>
+      <div class="wheel-unit">:</div>
+      <div class="wheel-col" id="alarmMinCol"></div>
+      <div class="wheel-col" id="alarmApCol"></div>
+    </div>
+    <div class="alarm-preview" id="alarmPreview"></div>
+    <button id="alarmCreateBtn" class="primary-btn">⏰ Create 3 alarms</button>
+    <div class="section-label" style="padding-left:0;margin-top:16px;">Saved stacks</div>
+    <div id="alarmStackList"></div>
   </div>
 </div>
 
@@ -339,7 +376,13 @@
       <input type="file" id="importFile" accept="application/json" hidden>
     </div>
     <div class="sheet-actions">
-      <button id="resetBtn" class="pill-btn danger">Erase all data</button>
+      <button id="clearPracticeBtn" class="pill-btn danger">Clear practice records</button>
+    </div>
+    <div class="sheet-actions">
+      <button id="clearSampleBtn" class="pill-btn danger">Remove all sample data</button>
+    </div>
+    <div class="sheet-actions">
+      <button id="resetBtn" class="pill-btn danger">Erase everything</button>
     </div>
     <p class="settings-note">All data stays on this device. Export regularly to keep a backup.</p>
   </div>

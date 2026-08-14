@@ -105,7 +105,7 @@ function seedState() {
     ],
     lists: [
       {
-        id: uid(), name: 'Errands', attachedDate: today,
+        id: uid(), name: 'To Do List', attachedDate: today,
         items: [
           { id: uid(), text: 'Post office — mail package', done: false },
           { id: uid(), text: 'Pharmacy pickup', done: true },
@@ -131,7 +131,7 @@ function seedState() {
         ]
       },
     ],
-    settings: { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' },
+    settings: { theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
 }
@@ -173,6 +173,16 @@ function ensureHabitSessions(s) {
   (s.habits || []).forEach(h => { if (!h.sessions) h.sessions = []; });
 }
 
+function ensureNewCollections(s) {
+  if (!s.alarmStacks) s.alarmStacks = [];
+  if (!s.chatLog) s.chatLog = [];
+  if (!s.aiMemory) s.aiMemory = { facts: [] };
+  if (!s.aiMemory.facts) s.aiMemory.facts = [];
+  if (s.settings && s.settings.showSchedule === undefined) s.settings.showSchedule = false;
+  // Existing installs seeded the day list as "Errands"; it's the To Do List now.
+  (s.lists || []).forEach(l => { if (l.name === 'Errands') l.name = 'To Do List'; });
+}
+
 let state = loadState();
 if (!state.view) state.view = { current: 'today', todayOffset: 0, weekOffset: 0 };
 if (!state.routines) state.routines = [];
@@ -181,6 +191,7 @@ if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, 
 if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
 if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
 ensureHabitSessions(state);
+ensureNewCollections(state);
 
 /* ======================= Theme ======================= */
 const COLOR_SCHEMES = [
@@ -244,15 +255,26 @@ function renderColorSwatches(selectedId) {
 }
 
 /* ======================= Navigation ======================= */
-const views = ['today', 'week', 'habits', 'stats'];
-const titles = { today: 'Today', week: 'Week', habits: 'Habits', stats: 'Stats' };
+const views = ['today', 'week', 'habits', 'chat', 'stats'];
+const titles = { today: 'Today', week: 'Week', habits: 'Habits', chat: 'Assistant', stats: 'Stats' };
 
 function switchView(name) {
   state.view.current = name;
   views.forEach(v => document.getElementById('view-' + v).classList.toggle('active', v === name));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
   document.getElementById('viewTitle').textContent = titles[name];
+  updateInputBarMode();
   renderAll();
+}
+
+// The single bottom input bar doubles as quick-capture and the chat composer.
+function updateInputBarMode() {
+  const isChat = state.view.current === 'chat';
+  const input = document.getElementById('quickAddInput');
+  document.getElementById('quickAddModeBtn').hidden = isChat;
+  document.querySelector('.quick-add-btn').textContent = isChat ? '↑' : '＋';
+  if (isChat) input.placeholder = 'Ask me anything…';
+  else setQuickAddMode(quickAddMode);
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -295,10 +317,14 @@ function renderToday() {
     attached.forEach(list => {
       const card = document.createElement('div');
       card.className = 'list-card';
-      const head = document.createElement('div');
-      head.className = 'list-card-head';
-      head.innerHTML = `<span class="lname">${escapeHtml(list.name)}</span>`;
-      card.appendChild(head);
+      // With a single attached list the "To Do List" section label already
+      // names it — repeating the name inside the card just reads as a dupe.
+      if (attached.length > 1) {
+        const head = document.createElement('div');
+        head.className = 'list-card-head';
+        head.innerHTML = `<span class="lname">${escapeHtml(list.name)}</span>`;
+        card.appendChild(head);
+      }
       list.items.forEach(item => {
         const row = document.createElement('div');
         row.className = 'checklist-today-list-item';
@@ -317,6 +343,7 @@ function renderToday() {
     });
   }
 
+  renderScheduleToggle(ds);
   renderGrid(ds);
 }
 
@@ -339,6 +366,56 @@ function renderInboxItem(t) {
   });
   makeInboxDraggable(el, t);
   return el;
+}
+
+/* The hourly grid is collapsed by default — the first screen stays Inbox +
+   To Do List. The toggle keeps a one-line summary so it isn't hidden blindly. */
+function renderScheduleToggle(ds) {
+  const open = !!state.settings.showSchedule;
+  const toggle = document.getElementById('scheduleToggle');
+  toggle.classList.toggle('open', open);
+  document.getElementById('gridScroll').hidden = !open;
+
+  const blocks = state.tasks
+    .filter(t => t.date === ds && t.startMin != null)
+    .sort((a, b) => a.startMin - b.startMin);
+  const summaryEl = document.getElementById('scheduleSummary');
+  if (open) { summaryEl.textContent = ''; return; }
+  if (!blocks.length) { summaryEl.textContent = 'nothing scheduled'; return; }
+
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const isToday = ds === todayStr();
+  const upcoming = isToday ? blocks.find(b => !b.done && b.startMin + b.durationMin > nowMin) : blocks.find(b => !b.done);
+  summaryEl.textContent = upcoming
+    ? `${blocks.length} block${blocks.length === 1 ? '' : 's'} · next ${upcoming.title} at ${minToLabel(upcoming.startMin)}`
+    : `${blocks.length} block${blocks.length === 1 ? '' : 's'} · all done`;
+}
+
+document.getElementById('scheduleToggle').addEventListener('click', () => {
+  state.settings.showSchedule = !state.settings.showSchedule;
+  saveState();
+  renderToday();
+  if (state.settings.showSchedule) scrollGridToRelevant();
+});
+
+/* Opening the schedule at 6 AM is useless — jump to now (or the first block
+   of the day when viewing another date) so the useful rows are on screen. */
+function scrollGridToRelevant() {
+  const scroller = document.getElementById('gridScroll');
+  const ds = currentTodayDateStr();
+  const isToday = ds === todayStr();
+  let focusMin;
+  if (isToday) {
+    const now = new Date();
+    focusMin = now.getHours() * 60 + now.getMinutes();
+  } else {
+    const first = state.tasks
+      .filter(t => t.date === ds && t.startMin != null)
+      .sort((a, b) => a.startMin - b.startMin)[0];
+    focusMin = first ? first.startMin : 9 * 60;
+  }
+  const target = (Math.max(GRID_START_MIN, focusMin - 30) - GRID_START_MIN) * PX_PER_MIN;
+  requestAnimationFrame(() => { scroller.scrollTop = target; });
 }
 
 function currentTodayDateStr() { return dateStr(currentTodayDate()); }
@@ -726,6 +803,12 @@ document.getElementById('quickAddForm').addEventListener('submit', (e) => {
   const title = input.value.trim();
   if (!title) return;
 
+  if (state.view.current === 'chat') {
+    input.value = '';
+    handleChatInput(title);
+    return;
+  }
+
   if (quickAddMode === 'habit') {
     state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {}, sessions: [] });
     saveState();
@@ -982,6 +1065,10 @@ function openHabitSheet(h) {
   habitFreqCount = h && h.freq.type === 'weekly' ? h.freq.count : 3;
   updateFreqUI();
   document.getElementById('habitDeleteBtn').hidden = !h;
+  const clearBtn = document.getElementById('habitClearRecordsBtn');
+  const hasRecords = !!(h && h.sessions && h.sessions.length);
+  clearBtn.hidden = !hasRecords;
+  if (hasRecords) clearBtn.textContent = `Clear ${h.sessions.length} record${h.sessions.length === 1 ? '' : 's'}`;
   openSheet('habitSheet');
 }
 
@@ -1010,6 +1097,15 @@ document.getElementById('habitSaveBtn').addEventListener('click', () => {
   saveState();
   closeSheets();
   renderAll();
+});
+
+document.getElementById('habitClearRecordsBtn').addEventListener('click', () => {
+  if (!activeHabit) return;
+  activeHabit.sessions = [];
+  saveState();
+  closeSheets();
+  renderAll();
+  toast('Records cleared for this habit');
 });
 
 document.getElementById('habitDeleteBtn').addEventListener('click', () => {
@@ -1203,6 +1299,27 @@ function routineTotalSeconds(r) { return r.steps.reduce((sum, s) => sum + s.seco
 function renderRoutinesSheet() {
   const wrap = document.getElementById('routinesContainer');
   wrap.innerHTML = '';
+
+  const alarmCard = document.createElement('div');
+  alarmCard.className = 'routine-card';
+  const stackCount = state.alarmStacks.length;
+  alarmCard.innerHTML = `
+    <div class="routine-card-head">
+      <div>
+        <div class="rname">⏰ Triple Alarm</div>
+        <div class="routine-card-meta">${stackCount ? `${stackCount} stack${stackCount === 1 ? '' : 's'} saved` : 'One time → three alarms, 2 min apart'}</div>
+      </div>
+    </div>
+    <div class="routine-card-actions">
+      <button class="pill-btn accent" data-act="alarm">Set up</button>
+    </div>
+  `;
+  alarmCard.querySelector('[data-act="alarm"]').addEventListener('click', () => {
+    closeSheets();
+    openAlarmSheet();
+  });
+  wrap.appendChild(alarmCard);
+
   state.routines.forEach(r => {
     const card = document.createElement('div');
     card.className = 'routine-card';
@@ -1287,14 +1404,18 @@ function buildWheelColumn(container, values, formatFn, initialValue) {
     }, 120);
   }, { passive: true });
 
-  container.scrollTop = state.index * WHEEL_ROW_H;
+  // A hidden element has no layout, so assigning scrollTop is a no-op and the
+  // wheel would open parked on the first value. Defer until after paint.
+  const seek = () => { container.scrollTop = state.index * WHEEL_ROW_H; };
+  seek();
+  requestAnimationFrame(() => { seek(); requestAnimationFrame(seek); });
   applyCenterStyles();
 
   return {
     getValue: () => state.values[state.index],
     setValue: (v) => {
       state.index = Math.max(0, values.indexOf(v));
-      container.scrollTop = state.index * WHEEL_ROW_H;
+      seek();
       applyCenterStyles();
     },
   };
@@ -1307,9 +1428,9 @@ let wheelMinCtrl = null, wheelSecCtrl = null;
 function openDurationPicker() {
   const mins = Math.floor(stepDurDraft / 60);
   const secs = stepDurDraft % 60;
+  openSheet('durationPickerSheet');   // must be visible before wheels can scroll
   wheelMinCtrl = buildWheelColumn(document.getElementById('wheelMin'), MIN_VALUES, (v) => String(v), Math.min(mins, 30));
   wheelSecCtrl = buildWheelColumn(document.getElementById('wheelSec'), SEC_VALUES, (v) => pad2(v), secs);
-  openSheet('durationPickerSheet');
 }
 
 document.getElementById('stepDurBtn').addEventListener('click', openDurationPicker);
@@ -1575,6 +1696,170 @@ document.getElementById('choreDoneBtn').addEventListener('click', () => stopChor
 document.getElementById('choreCancelBtn').addEventListener('click', () => stopChoreTimer(false));
 document.getElementById('choreCloseBtn').addEventListener('click', () => stopChoreTimer(false));
 
+/* ======================= Triple alarm stack ======================= */
+/* A PWA cannot create alarms in the iOS Clock app — no web API exists for it.
+   What it CAN do is emit a standard .ics with VALARM triggers, which iOS hands
+   to the Calendar app; those fire as real system alerts even with DayFlow shut.
+   In-app reminders are registered too, as a belt-and-braces fallback. */
+const ALARM_GAP_MIN = 2;
+let alarmHourCtrl = null, alarmMinCtrl = null, alarmApCtrl = null;
+
+const HOUR_VALUES = Array.from({ length: 12 }, (_, i) => i + 1);
+const MINUTE_VALUES = Array.from({ length: 60 }, (_, i) => i);
+const AP_VALUES = ['AM', 'PM'];
+
+function alarmSelectedMin() {
+  let h = alarmHourCtrl ? alarmHourCtrl.getValue() : 10;
+  const m = alarmMinCtrl ? alarmMinCtrl.getValue() : 0;
+  const ap = alarmApCtrl ? alarmApCtrl.getValue() : 'PM';
+  if (ap === 'AM' && h === 12) h = 0;
+  if (ap === 'PM' && h !== 12) h += 12;
+  return h * 60 + m;
+}
+
+function renderAlarmPreview() {
+  const base = alarmSelectedMin();
+  const wrap = document.getElementById('alarmPreview');
+  wrap.innerHTML = [0, ALARM_GAP_MIN, ALARM_GAP_MIN * 2]
+    .map((off, i) => `<span class="ap-chip${i === 0 ? ' first' : ''}">${minToLabel((base + off) % 1440)}</span>`)
+    .join('');
+}
+
+function openAlarmSheet() {
+  const now = new Date();
+  let defMin = 22 * 60;
+  const last = state.alarmStacks[state.alarmStacks.length - 1];
+  if (last) defMin = last.startMin;
+  let h24 = Math.floor(defMin / 60);
+  const mm = defMin % 60;
+  const ap = h24 >= 12 ? 'PM' : 'AM';
+  let h12 = h24 % 12; if (h12 === 0) h12 = 12;
+
+  document.getElementById('alarmLabelInput').value = '';
+  renderAlarmStackList();
+  // Open first: the wheels need real layout before they can be scrolled.
+  openSheet('alarmSheet');
+
+  alarmHourCtrl = buildWheelColumn(document.getElementById('alarmHourCol'), HOUR_VALUES, v => String(v), h12);
+  alarmMinCtrl = buildWheelColumn(document.getElementById('alarmMinCol'), MINUTE_VALUES, v => pad2(v), mm);
+  alarmApCtrl = buildWheelColumn(document.getElementById('alarmApCol'), AP_VALUES, v => v, ap);
+
+  [document.getElementById('alarmHourCol'), document.getElementById('alarmMinCol'), document.getElementById('alarmApCol')]
+    .forEach(col => {
+      if (col._previewBound) return;   // openAlarmSheet can run many times
+      col._previewBound = true;
+      col.addEventListener('scroll', () => {
+        clearTimeout(col._prevT);
+        col._prevT = setTimeout(renderAlarmPreview, 160);
+      }, { passive: true });
+    });
+
+  renderAlarmPreview();
+}
+
+function icsStamp(d) {
+  return `${d.getUTCFullYear()}${pad2(d.getUTCMonth() + 1)}${pad2(d.getUTCDate())}T${pad2(d.getUTCHours())}${pad2(d.getUTCMinutes())}${pad2(d.getUTCSeconds())}Z`;
+}
+// Floating local time (no Z): the alarm should fire at 10pm wherever you are.
+function icsLocal(dateObj, min) {
+  const d = new Date(dateObj);
+  d.setHours(Math.floor(min / 60), min % 60, 0, 0);
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
+}
+
+function buildAlarmIcs(stack) {
+  const now = new Date();
+  const stamp = icsStamp(now);
+  // First occurrence: today if the time hasn't passed, else tomorrow.
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const firstDay = stack.startMin > nowMin ? now : addDays(now, 1);
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//DayFlow//Triple Alarm//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+  ];
+
+  [0, ALARM_GAP_MIN, ALARM_GAP_MIN * 2].forEach((off, i) => {
+    const min = (stack.startMin + off) % 1440;
+    const dayForThis = (stack.startMin + off) >= 1440 ? addDays(firstDay, 1) : firstDay;
+    const title = `${stack.label || 'DayFlow Alarm'} (${i + 1}/3)`;
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${stack.id}-${i}@dayflow`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${icsLocal(dayForThis, min)}`,
+      'DURATION:PT1M',
+      'RRULE:FREQ=DAILY',
+      `SUMMARY:${title}`,
+      'DESCRIPTION:Created by DayFlow',
+      'BEGIN:VALARM',
+      'TRIGGER:PT0M',
+      'ACTION:DISPLAY',
+      `DESCRIPTION:${title}`,
+      'END:VALARM',
+      'END:VEVENT'
+    );
+  });
+
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
+
+function downloadAlarmIcs(stack) {
+  const ics = buildAlarmIcs(stack);
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `dayflow-alarms-${minToTimeInput(stack.startMin).replace(':', '')}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function renderAlarmStackList() {
+  const wrap = document.getElementById('alarmStackList');
+  wrap.innerHTML = '';
+  state.alarmStacks.forEach(stack => {
+    const card = document.createElement('div');
+    card.className = 'alarm-stack-card';
+    card.innerHTML = `
+      <div class="alarm-stack-info">
+        <div class="alarm-stack-time">${minToLabel(stack.startMin)}</div>
+        <div class="alarm-stack-meta">${escapeHtml(stack.label || 'DayFlow Alarm')} · +${ALARM_GAP_MIN}m · +${ALARM_GAP_MIN * 2}m</div>
+      </div>
+      <button class="asc-btn dl" data-act="dl" aria-label="Re-download">⤓</button>
+      <button class="asc-btn" data-act="del" aria-label="Delete">✕</button>
+    `;
+    card.querySelector('[data-act="dl"]').addEventListener('click', () => {
+      downloadAlarmIcs(stack);
+      toast('Opening in Calendar…');
+    });
+    card.querySelector('[data-act="del"]').addEventListener('click', () => {
+      state.alarmStacks = state.alarmStacks.filter(s => s.id !== stack.id);
+      saveState();
+      renderAlarmStackList();
+      toast('Stack removed from DayFlow');
+    });
+    wrap.appendChild(card);
+  });
+}
+
+document.getElementById('alarmCreateBtn').addEventListener('click', () => {
+  const startMin = alarmSelectedMin();
+  const label = document.getElementById('alarmLabelInput').value.trim() || 'DayFlow Alarm';
+  const stack = { id: uid(), startMin, label, createdAt: Date.now() };
+  state.alarmStacks.push(stack);
+  saveState();
+  downloadAlarmIcs(stack);
+  renderAlarmStackList();
+  toast('3 alarms created — add them in Calendar');
+});
+
 /* ======================= Habit timer ======================= */
 let habitTimerRunning = null, habitTimerStartTs = 0, habitTimerInterval = null;
 
@@ -1625,6 +1910,524 @@ function stopHabitTimer(save) {
 document.getElementById('habitDoneRunBtn').addEventListener('click', () => stopHabitTimer(true));
 document.getElementById('habitCancelBtn').addEventListener('click', () => stopHabitTimer(false));
 document.getElementById('habitRunCloseBtn').addEventListener('click', () => stopHabitTimer(false));
+
+/* ======================= Voice dictation =======================
+   Uses the Web Speech API, which Safari supports on iOS 14.5+. Recognition
+   itself is handled by the OS/Apple, not by DayFlow. Where it's unavailable
+   (some standalone-PWA builds), we say so plainly and point at the keyboard's
+   own mic key, which always works. */
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null, isListening = false, dictationBase = '';
+
+function voiceSupported() { return !!SpeechRec; }
+
+function initRecognition() {
+  if (!voiceSupported() || recognition) return recognition;
+  recognition = new SpeechRec();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = navigator.language || 'en-US';
+
+  recognition.onresult = (event) => {
+    let transcript = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    const input = document.getElementById('quickAddInput');
+    input.value = (dictationBase ? dictationBase + ' ' : '') + transcript;
+  };
+
+  recognition.onerror = (e) => {
+    stopListening();
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      toast('Mic blocked — allow it in Settings › Safari');
+    } else if (e.error !== 'aborted' && e.error !== 'no-speech') {
+      toast('Dictation error: ' + e.error);
+    } else if (e.error === 'no-speech') {
+      toast("Didn't catch anything");
+    }
+  };
+
+  recognition.onend = () => {
+    if (isListening) stopListening();
+  };
+
+  return recognition;
+}
+
+function startListening() {
+  const rec = initRecognition();
+  if (!rec) {
+    toast('Use the 🎤 on your keyboard instead');
+    document.getElementById('quickAddInput').focus();
+    return;
+  }
+  dictationBase = document.getElementById('quickAddInput').value.trim();
+  try {
+    rec.start();
+    isListening = true;
+    document.getElementById('micBtn').classList.add('listening');
+    toast('Listening…');
+  } catch (err) {
+    // start() throws if already running; reset and ignore.
+    isListening = false;
+    document.getElementById('micBtn').classList.remove('listening');
+  }
+}
+
+function stopListening() {
+  isListening = false;
+  document.getElementById('micBtn').classList.remove('listening');
+  if (recognition) { try { recognition.stop(); } catch (e) { /* already stopped */ } }
+}
+
+document.getElementById('micBtn').addEventListener('click', () => {
+  if (isListening) {
+    stopListening();
+    // Auto-submit whatever was captured, so speaking a task files it in one go.
+    const input = document.getElementById('quickAddInput');
+    if (input.value.trim()) {
+      setTimeout(() => document.getElementById('quickAddForm').requestSubmit(), 120);
+    }
+  } else {
+    startListening();
+  }
+});
+
+/* ======================= Local assistant =======================
+   This is NOT a language model. Nothing is downloaded and nothing leaves the
+   device. It's an intent matcher over the user's own DayFlow data: it reads
+   their tasks, habits, chores and routines, answers questions about them, runs
+   commands, and derives a profile of their patterns. Honest about its limits
+   when it doesn't understand — see assistantFallback(). */
+
+const CHAT_CAP = 120;
+
+function pushChat(role, text) {
+  state.chatLog.push({ role, text, ts: Date.now() });
+  if (state.chatLog.length > CHAT_CAP) state.chatLog = state.chatLog.slice(-CHAT_CAP);
+  saveState();
+}
+
+function renderChat(scroll = true) {
+  const log = document.getElementById('chatLog');
+  log.innerHTML = '';
+  if (!state.chatLog.length) {
+    pushChat('bot', assistantGreeting());
+  }
+  state.chatLog.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'chat-msg ' + m.role;
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.innerHTML = formatChatText(m.text);
+    row.appendChild(bubble);
+    log.appendChild(row);
+  });
+  renderChatChips();
+  if (scroll) requestAnimationFrame(() => {
+    const view = document.getElementById('view-chat');
+    view.scrollTop = view.scrollHeight;
+  });
+}
+
+// Minimal, safe formatter: escape everything, then allow **bold** and <n> numbers.
+function formatChatText(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\{\{(.+?)\}\}/g, '<span class="num">$1</span>');
+}
+
+const CHAT_CHIPS = [
+  "What's on today?",
+  'How am I doing this week?',
+  'What do you know about me?',
+  'What should I do next?',
+  'Show my records',
+];
+
+function renderChatChips() {
+  const wrap = document.getElementById('chatChips');
+  wrap.innerHTML = '';
+  CHAT_CHIPS.forEach(text => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chat-chip';
+    chip.textContent = text;
+    chip.addEventListener('click', () => handleChatInput(text));
+    wrap.appendChild(chip);
+  });
+}
+
+function assistantGreeting() {
+  const h = new Date().getHours();
+  const part = h < 12 ? 'Morning' : h < 18 ? 'Afternoon' : 'Evening';
+  return `${part}. I'm your DayFlow assistant — I run entirely on this phone and can only see the data in this app.\n\nAsk me about your day, your streaks or your records, or just tell me things like "add call the bank" or "start morning routine".`;
+}
+
+/* ---------- Derived profile: what the app has "learned" ---------- */
+function buildUserProfile() {
+  const now = new Date();
+  const byWeekday = Array.from({ length: 7 }, () => ({ total: 0, done: 0 }));
+  let totalTasks = 0, doneTasks = 0;
+  const firstBlockMins = [];
+
+  for (let i = 0; i < 60; i++) {
+    const d = addDays(now, -i);
+    const ds = dateStr(d);
+    const dayTasks = state.tasks.filter(t => t.date === ds);
+    if (!dayTasks.length) continue;
+    const done = dayTasks.filter(t => t.done).length;
+    byWeekday[d.getDay()].total += dayTasks.length;
+    byWeekday[d.getDay()].done += done;
+    totalTasks += dayTasks.length;
+    doneTasks += done;
+    const timed = dayTasks.filter(t => t.startMin != null).sort((a, b) => a.startMin - b.startMin);
+    if (timed.length) firstBlockMins.push(timed[0].startMin);
+  }
+
+  let bestDay = null, bestRate = -1, worstDay = null, worstRate = 2;
+  byWeekday.forEach((w, i) => {
+    if (w.total < 2) return;
+    const rate = w.done / w.total;
+    if (rate > bestRate) { bestRate = rate; bestDay = i; }
+    if (rate < worstRate) { worstRate = rate; worstDay = i; }
+  });
+
+  const avgStart = firstBlockMins.length
+    ? Math.round(firstBlockMins.reduce((a, b) => a + b, 0) / firstBlockMins.length) : null;
+
+  const habitsRanked = state.habits
+    .map(h => ({ h, streak: computeStreak(h), best: computeLongestStreak(h) }))
+    .sort((a, b) => b.streak - a.streak);
+
+  const timedHabits = state.habits.filter(h => h.sessions && h.sessions.length);
+  const totalPractice = timedHabits.reduce((a, h) => a + habitTotalPracticeSeconds(h), 0);
+
+  return {
+    completionRate: totalTasks ? doneTasks / totalTasks : null,
+    totalTasks, doneTasks,
+    bestDay, bestRate, worstDay, worstRate,
+    avgStart,
+    habitsRanked,
+    timedHabits,
+    totalPractice,
+    chores: state.chores.filter(c => c.sessions.length),
+    openInbox: state.tasks.filter(t => !t.done && t.startMin == null).length,
+  };
+}
+
+/* ---------- Intent handling ---------- */
+function handleChatInput(raw) {
+  const text = (raw || '').trim();
+  if (!text) return;
+  pushChat('user', text);
+  renderChat();
+  const reply = assistantRespond(text);
+  setTimeout(() => {
+    pushChat('bot', reply);
+    renderChat();
+  }, 220);
+}
+
+function assistantRespond(raw) {
+  const q = raw.toLowerCase().trim();
+  const ds = todayStr();
+
+  // --- Commands that change data ---
+  let m = q.match(/^(?:add|new|create)\s+(?:a\s+)?(?:task\s+)?(?:called\s+)?(.+)$/);
+  if (m && !/habit|routine|alarm|list/.test(m[1].slice(0, 12))) {
+    const title = raw.trim().replace(/^(?:add|new|create)\s+(?:a\s+)?(?:task\s+)?(?:called\s+)?/i, '').trim();
+    if (title) {
+      state.tasks.push({ id: uid(), title, date: ds, startMin: null, durationMin: 30, done: false, createdAt: Date.now() });
+      saveState(); renderAll();
+      return `Added **${title}** to today's inbox. It's untimed — drag it onto the schedule whenever you want, or leave it there.`;
+    }
+  }
+
+  m = q.match(/^(?:add|new|create|track)\s+(?:a\s+)?habit\s+(?:called\s+)?(.+)$/);
+  if (m) {
+    const name = raw.trim().replace(/^(?:add|new|create|track)\s+(?:a\s+)?habit\s+(?:called\s+)?/i, '').trim();
+    state.habits.push({ id: uid(), name, freq: { type: 'daily' }, completions: {}, sessions: [] });
+    saveState(); renderAll();
+    return `Tracking **${name}** as a daily habit from today. You can change it to an x-per-week habit by tapping its name on the Habits tab.`;
+  }
+
+  m = q.match(/(?:start|run|begin|do)\s+(?:the\s+|my\s+)?(.+?)\s*(?:routine)?$/);
+  if (m && /routine|morning|bed|gym/.test(q)) {
+    const target = m[1].replace(/\b(the|my|routine)\b/g, '').trim();
+    const found = state.routines.find(r => r.name.toLowerCase().includes(target)) ||
+                  state.routines.find(r => target.includes(r.name.toLowerCase()));
+    if (found) {
+      setTimeout(() => { closeSheets(); startRoutine(found); }, 400);
+      return `Starting **${found.name}** — ${found.steps.length} steps, about ${fmtMinSec(routineTotalSeconds(found))}. Timer's coming up now.`;
+    }
+    if (state.routines.length) {
+      return `I don't have a routine matching that. You've got: ${state.routines.map(r => r.name).join(', ')}.`;
+    }
+  }
+
+  m = q.match(/remember (?:that )?(.+)/);
+  if (m) {
+    const fact = raw.trim().replace(/^remember\s+(?:that\s+)?/i, '').trim();
+    state.aiMemory.facts.push({ id: uid(), text: fact, ts: Date.now() });
+    saveState();
+    return `Noted: **${fact}**\n\nI'll keep that in mind. Ask "what do you know about me" any time to see everything I'm holding.`;
+  }
+
+  if (/^(forget|clear).*(memor|remember|know)/.test(q)) {
+    const n = state.aiMemory.facts.length;
+    state.aiMemory.facts = [];
+    saveState();
+    return n ? `Forgotten — cleared ${n} note${n === 1 ? '' : 's'}.` : `I wasn't holding any notes about you.`;
+  }
+
+  // --- Questions about the day ---
+  if (/(what|whats|what's|show).*(today|schedule|plan|on now|day look)/.test(q) || q === 'today') {
+    return describeToday(ds);
+  }
+
+  if (/(what|which).*(next|should i do|focus)/.test(q) || /what now/.test(q)) {
+    return suggestNext(ds);
+  }
+
+  if (/(how|hows|how's).*(week|doing|going|month|progress)/.test(q) || /review/.test(q)) {
+    return weekReview();
+  }
+
+  if (/streak/.test(q)) {
+    return streakReport();
+  }
+
+  if (/(record|pr|personal best|practice|longest session)/.test(q)) {
+    return recordsReport();
+  }
+
+  if (/how long.*(take|does|spend)/.test(q) || /(average|avg).*(chore|time)/.test(q)) {
+    return choreReport(q);
+  }
+
+  if (/(what do you know|about me|my pattern|insight|learned)/.test(q)) {
+    return profileReport();
+  }
+
+  if (/(habit|inbox|task).*(list|show|all)|^habits?$|^tasks?$/.test(q)) {
+    return listReport(q);
+  }
+
+  if (/(help|what can you do|commands)/.test(q)) {
+    return assistantHelp();
+  }
+
+  if (/^(hi|hey|hello|yo|sup|good (morning|evening|afternoon))\b/.test(q)) {
+    return assistantGreeting();
+  }
+
+  if (/(thanks|thank you|ty|nice|cool|awesome)/.test(q)) {
+    return `Any time. I'm here whenever you need a nudge.`;
+  }
+
+  return assistantFallback(raw);
+}
+
+function describeToday(ds) {
+  const dayTasks = state.tasks.filter(t => t.date === ds);
+  const timed = dayTasks.filter(t => t.startMin != null).sort((a, b) => a.startMin - b.startMin);
+  const untimed = dayTasks.filter(t => t.startMin == null && !t.done);
+  const done = dayTasks.filter(t => t.done).length;
+  const lists = state.lists.filter(l => l.attachedDate === ds);
+
+  if (!dayTasks.length && !lists.length) {
+    return `Today's completely clear — nothing scheduled and nothing in the inbox. If that's wrong, tell me what to add.`;
+  }
+
+  let out = `**Today**\n`;
+  if (timed.length) {
+    out += `\nScheduled (${timed.length}):\n`;
+    timed.forEach(t => { out += `${t.done ? '✓' : '·'} ${minToLabel(t.startMin)} — ${t.title}\n`; });
+  }
+  if (untimed.length) {
+    out += `\nInbox (${untimed.length}, untimed):\n`;
+    untimed.slice(0, 6).forEach(t => { out += `· ${t.title}\n`; });
+    if (untimed.length > 6) out += `…and ${untimed.length - 6} more\n`;
+  }
+  lists.forEach(l => {
+    const open = l.items.filter(i => !i.done).length;
+    if (open) out += `\n${l.name}: {{${open}}} item${open === 1 ? '' : 's'} left\n`;
+  });
+  if (dayTasks.length) out += `\nDone so far: {{${done}}} of {{${dayTasks.length}}}.`;
+  return out.trim();
+}
+
+function suggestNext(ds) {
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const dayTasks = state.tasks.filter(t => t.date === ds && !t.done);
+  const current = dayTasks.find(t => t.startMin != null && t.startMin <= nowMin && t.startMin + t.durationMin > nowMin);
+  if (current) return `Right now you're meant to be on **${current.title}** — it runs until ${minToLabel(current.startMin + current.durationMin)}.`;
+
+  const next = dayTasks.filter(t => t.startMin != null && t.startMin > nowMin).sort((a, b) => a.startMin - b.startMin)[0];
+  if (next) {
+    const gap = next.startMin - nowMin;
+    const untimed = dayTasks.filter(t => t.startMin == null);
+    let out = `Next up is **${next.title}** at ${minToLabel(next.startMin)} — that's {{${gap}}} minutes away.`;
+    if (untimed.length && gap >= 15) {
+      const quick = untimed[0];
+      out += `\n\nEnough of a gap to knock out **${quick.title}** from the inbox first, if you want the easy win.`;
+    }
+    return out;
+  }
+
+  const untimed = dayTasks.filter(t => t.startMin == null);
+  const undoneHabits = state.habits.filter(h => !habitDoneOn(h, todayStr()));
+  if (untimed.length) {
+    return `Nothing scheduled for the rest of today. Smallest thing in your inbox is **${untimed[0].title}** — start there, it's the lowest-friction one.`;
+  }
+  if (undoneHabits.length) {
+    return `Schedule's clear and the inbox is empty. Still open today: ${undoneHabits.map(h => h.name).join(', ')}. Pick whichever feels easiest right now.`;
+  }
+  return `Nothing left on the board today — schedule clear, inbox empty, habits checked off. You're done. Genuinely.`;
+}
+
+function weekReview() {
+  const p = buildUserProfile();
+  if (p.completionRate == null) return `Not enough history yet to review — once you've been ticking things off for a few days I'll have something useful to say.`;
+
+  const now = new Date();
+  let wTotal = 0, wDone = 0;
+  for (let i = 0; i < 7; i++) {
+    const ds = dateStr(addDays(now, -i));
+    const dayTasks = state.tasks.filter(t => t.date === ds);
+    wTotal += dayTasks.length;
+    wDone += dayTasks.filter(t => t.done).length;
+  }
+  const pct = wTotal ? Math.round((wDone / wTotal) * 100) : 0;
+
+  let out = `**Last 7 days**\n\nTasks: {{${wDone}}}/{{${wTotal}}} done ({{${pct}%}}).`;
+  const top = p.habitsRanked[0];
+  if (top && top.streak > 0) out += `\nLongest live streak: **${top.h.name}** at {{${top.streak}}}.`;
+  const cold = p.habitsRanked.filter(x => x.streak === 0);
+  if (cold.length) out += `\nCold right now: ${cold.map(x => x.h.name).join(', ')}.`;
+  if (p.bestDay != null) out += `\n\nYour strongest day tends to be **${WDFULL[p.bestDay]}** ({{${Math.round(p.bestRate * 100)}%}}).`;
+  if (p.totalPractice) out += `\nPractice logged: {{${fmtMinSec(p.totalPractice)}}} all-time.`;
+  return out;
+}
+
+function streakReport() {
+  if (!state.habits.length) return `No habits yet. Say "add habit stretch" and I'll start tracking one.`;
+  let out = `**Streaks**\n\n`;
+  state.habits
+    .map(h => ({ h, cur: computeStreak(h), best: computeLongestStreak(h) }))
+    .sort((a, b) => b.cur - a.cur)
+    .forEach(({ h, cur, best }) => {
+      const flame = cur >= 7 ? ' 🔥' : '';
+      out += `${h.name} — now {{${cur}}}, best {{${best}}}${flame}\n`;
+    });
+  const atRisk = state.habits.filter(h => computeStreak(h) > 2 && !habitDoneOn(h, todayStr()));
+  if (atRisk.length) out += `\nStill unchecked today: **${atRisk.map(h => h.name).join(', ')}** — worth protecting.`;
+  return out.trim();
+}
+
+function recordsReport() {
+  const timed = state.habits.filter(h => h.sessions && h.sessions.length);
+  const chores = state.chores.filter(c => c.sessions.length);
+  if (!timed.length && !chores.length) {
+    return `No timed records yet. Hit ▶ on any habit to time a practice session, or use the chore timer — after that I can tell you your averages and personal bests.`;
+  }
+  let out = `**Records**\n`;
+  if (timed.length) {
+    out += `\nPractice:\n`;
+    timed.forEach(h => {
+      out += `${h.name} — PR {{${fmtMinSec(habitPR(h))}}}, avg ${fmtMinSec(habitAvgSession(h))}, ${h.sessions.length} sessions\n`;
+    });
+    const total = timed.reduce((a, h) => a + habitTotalPracticeSeconds(h), 0);
+    out += `Total practice: {{${fmtMinSec(total)}}}\n`;
+  }
+  if (chores.length) {
+    out += `\nChores:\n`;
+    chores.forEach(c => { out += `${c.name} — usually {{${fmtMinSec(choreAverage(c))}}}\n`; });
+  }
+  return out.trim();
+}
+
+function choreReport(q) {
+  const chores = state.chores.filter(c => c.sessions.length);
+  if (!chores.length) return `I haven't timed any chores yet. Open the chore timer (⏳ up top), pick one and hit start — after a run or two I'll know your average.`;
+  const match = chores.find(c => q.includes(c.name.toLowerCase().split(' ')[0]));
+  if (match) {
+    const avg = choreAverage(match), last = choreLast(match);
+    return `**${match.name}** takes you about {{${fmtMinSec(avg)}}} on average.\n\nLast run was ${fmtMinSec(last)}, across ${match.sessions.length} timed run${match.sessions.length === 1 ? '' : 's'}. Worth remembering next time it feels like an hour-long job.`;
+  }
+  let out = `Here's how long things actually take you:\n\n`;
+  chores.forEach(c => { out += `${c.name} — {{${fmtMinSec(choreAverage(c))}}}\n`; });
+  return out.trim();
+}
+
+function profileReport() {
+  const p = buildUserProfile();
+  const facts = state.aiMemory.facts;
+  let out = `**What I've picked up**\n`;
+  let anything = false;
+
+  if (p.completionRate != null) {
+    anything = true;
+    out += `\nYou finish about {{${Math.round(p.completionRate * 100)}%}} of what you put on the board.`;
+  }
+  if (p.bestDay != null && p.worstDay != null && p.bestDay !== p.worstDay) {
+    anything = true;
+    out += `\n**${WDFULL[p.bestDay]}** is your best day; **${WDFULL[p.worstDay]}** is where things slip.`;
+  }
+  if (p.avgStart != null) {
+    anything = true;
+    out += `\nYour first scheduled block usually lands around **${minToLabel(p.avgStart)}**.`;
+  }
+  const top = p.habitsRanked[0];
+  if (top && top.streak > 0) {
+    anything = true;
+    out += `\nMost consistent habit: **${top.h.name}** ({{${top.streak}}} day streak).`;
+  }
+  if (p.totalPractice) {
+    anything = true;
+    out += `\nYou've logged {{${fmtMinSec(p.totalPractice)}}} of timed practice.`;
+  }
+  if (p.openInbox) {
+    anything = true;
+    out += `\nRight now there are {{${p.openInbox}}} untimed things sitting in your inbox.`;
+  }
+
+  if (facts.length) {
+    out += `\n\n**Things you told me:**\n`;
+    facts.forEach(f => { out += `· ${f.text}\n`; });
+  }
+
+  if (!anything && !facts.length) {
+    return `Honestly, not much yet — I only learn from what's in this app, and there isn't enough history to spot patterns. Use it for a week or so and ask again.\n\nYou can also tell me things directly: "remember that I focus best before noon".`;
+  }
+
+  out += `\n_All of this is computed on your phone from your own data — nothing is sent anywhere._`;
+  return out.trim();
+}
+
+function listReport(q) {
+  if (/habit/.test(q)) {
+    if (!state.habits.length) return `No habits tracked yet.`;
+    return `**Habits**\n\n` + state.habits.map(h => `· ${h.name} (${habitFreqLabel(h)}) — streak {{${computeStreak(h)}}}`).join('\n');
+  }
+  const open = state.tasks.filter(t => !t.done);
+  if (!open.length) return `Nothing open. Everything's either done or you haven't added it yet.`;
+  return `**Open tasks (${open.length})**\n\n` + open.slice(0, 12).map(t => `· ${t.title}${t.startMin != null ? ` — ${minToLabel(t.startMin)}` : ''}`).join('\n');
+}
+
+function assistantHelp() {
+  return `**Things I can do**\n\nAsk:\n· What's on today?\n· How am I doing this week?\n· What should I do next?\n· How long does washing dishes take?\n· Show my streaks / records\n· What do you know about me?\n\nTell:\n· add call the bank\n· add habit stretch\n· start morning routine\n· remember that I hate mornings\n\nI'm a simple matcher, not a chatbot with a language model — plain phrasing works best.`;
+}
+
+function assistantFallback(raw) {
+  const p = buildUserProfile();
+  const hint = p.openInbox
+    ? `\n\nFor what it's worth, you've got {{${p.openInbox}}} things in the inbox right now if you're looking for somewhere to start.`
+    : '';
+  return `I didn't catch that one. I'm a small on-device matcher rather than a full language model, so I only understand a fixed set of phrasings.\n\nTry "help" to see exactly what I respond to — or if you meant to capture it, say "add ${raw.slice(0, 40)}".${hint}`;
+}
 
 /* ======================= Settings sheet ======================= */
 document.getElementById('settingsBtn').addEventListener('click', () => { applyTheme(); renderRemindersToggle(); openSheet('settingsSheet'); });
@@ -1713,6 +2516,18 @@ function checkReminders() {
       fireReminder('Routine time', `Time for your “${r.name}” routine`);
     }
   });
+
+  // In-app echo of the alarm stacks (the .ics in Calendar is the real alarm).
+  state.alarmStacks.forEach(stack => {
+    [0, ALARM_GAP_MIN, ALARM_GAP_MIN * 2].forEach((off, i) => {
+      const min = (stack.startMin + off) % 1440;
+      const key = `${ds}_${stack.id}_${i}`;
+      if (min === nowMin && !notifiedTaskKeys.has(key)) {
+        notifiedTaskKeys.add(key);
+        fireReminder(`${stack.label} (${i + 1}/3)`, i === 2 ? 'Last call.' : 'Time to move.');
+      }
+    });
+  });
 }
 setInterval(checkReminders, 20000);
 
@@ -1745,6 +2560,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
       if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
       if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
       ensureHabitSessions(state);
+      ensureNewCollections(state);
       saveState();
       applyTheme();
       renderAll();
@@ -1757,14 +2573,50 @@ document.getElementById('importFile').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
-document.getElementById('resetBtn').addEventListener('click', () => {
-  if (!confirm('Erase all DayFlow data on this device? This cannot be undone.')) return;
-  state = seedState();
+function emptyState() {
+  return {
+    tasks: [], habits: [], routines: [], chores: [], lists: [],
+    alarmStacks: [], chatLog: [], aiMemory: { facts: [] },
+    settings: { ...state.settings },
+    view: { current: state.view.current, todayOffset: 0, weekOffset: 0 },
+  };
+}
+
+document.getElementById('clearPracticeBtn').addEventListener('click', () => {
+  const sessionCount = state.habits.reduce((a, h) => a + (h.sessions || []).length, 0)
+    + state.chores.reduce((a, c) => a + (c.sessions || []).length, 0);
+  if (!sessionCount) { toast('No practice records to clear'); return; }
+  if (!confirm(`Clear all ${sessionCount} timed practice records? Habits, streaks and chores stay — only the recorded times go.`)) return;
+  state.habits.forEach(h => { h.sessions = []; });
+  state.chores.forEach(c => { c.sessions = []; });
+  saveState();
+  renderAll();
+  toast('Practice records cleared');
+});
+
+document.getElementById('clearSampleBtn').addEventListener('click', () => {
+  if (!confirm('Remove all sample tasks, habits, routines, chores and lists? Your settings stay. This gives you a blank slate.')) return;
+  const settings = state.settings;
+  const view = state.view;
+  state = emptyState();
+  state.settings = settings;
+  state.view = view;
   saveState();
   applyTheme();
   closeSheets();
   renderAll();
-  toast('Data reset');
+  toast('Blank slate — all yours now');
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  if (!confirm('Erase everything, including settings? This cannot be undone.')) return;
+  state = emptyState();
+  state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false };
+  saveState();
+  applyTheme();
+  closeSheets();
+  renderAll();
+  toast('Everything erased');
 });
 
 /* ======================= Sheets generic ======================= */
@@ -1786,6 +2638,7 @@ function renderAll() {
   if (state.view.current === 'today') renderToday();
   if (state.view.current === 'week') renderWeek();
   if (state.view.current === 'habits') renderHabits();
+  if (state.view.current === 'chat') renderChat();
   if (state.view.current === 'stats') renderStats();
 }
 
