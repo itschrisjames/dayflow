@@ -271,6 +271,16 @@ button { font-family: inherit; }
 .habit-streak .n.tick { animation: tickUp .3s ease; }
 @keyframes tickUp { 0%{transform: translateY(0); opacity:1;} 40%{transform: translateY(-6px); opacity:0.4;} 41%{transform: translateY(6px);} 100%{transform: translateY(0); opacity:1;} }
 .habit-streak .lbl { font-size: 9.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .04em; }
+.habit-practice-btn {
+  flex-shrink: 0; border: none; background: var(--bg-sunken); color: var(--text-dim);
+  width: 40px; height: 40px; border-radius: 50%; font-size: 15px;
+}
+.habit-practice-btn:active { transform: scale(0.9); }
+.habit-practice-meta {
+  font-size: 11px; color: var(--text-faint); margin-top: 8px;
+  display: flex; align-items: center; gap: 5px;
+}
+.habit-practice-meta .pr { color: var(--accent); font-weight: 700; }
 .heatmap { display: flex; gap: 2.5px; margin-top: 10px; overflow-x: auto; padding-bottom: 2px; }
 .heatmap-col { display: flex; flex-direction: column; gap: 2.5px; }
 .heatmap-cell { width: 10px; height: 10px; border-radius: 3px; background: var(--bg-sunken); }
@@ -484,9 +494,36 @@ button { font-family: inherit; }
   flex: 1 1 100%; border: 1px solid var(--border); background: var(--bg-sunken); border-radius: 8px;
   padding: 8px 10px; font-size: 13.5px; color: var(--text); height: 40px;
 }
-.step-dur-stepper { flex: 1; gap: 8px; }
-.step-dur-stepper span { min-width: 44px; font-size: 12.5px; }
-.step-dur-stepper .stepper-btn { width: 28px; height: 28px; font-size: 15px; }
+.dur-picker-btn {
+  flex: 0 0 auto; border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text);
+  border-radius: 8px; padding: 0 14px; font-size: 14px; font-weight: 700; height: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- iOS-style scrollable wheel picker ---------- */
+.wheel-picker {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  gap: 6px; height: 200px; margin: 4px 0 18px;
+}
+.wheel-highlight {
+  position: absolute; left: 8px; right: 8px; top: 50%; transform: translateY(-50%);
+  height: 40px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 8px; pointer-events: none;
+}
+.wheel-col {
+  position: relative; height: 200px; width: 64px; overflow-y: scroll;
+  scroll-snap-type: y mandatory; -webkit-overflow-scrolling: touch;
+  padding: 80px 0; scrollbar-width: none;
+}
+.wheel-col::-webkit-scrollbar { display: none; }
+.wheel-item {
+  height: 40px; display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;
+  scroll-snap-align: center; color: var(--text-faint); opacity: 0.4;
+}
+.wheel-item.wp-center { color: var(--text); font-weight: 800; opacity: 1; }
+.wheel-unit { font-size: 13.5px; color: var(--text-dim); font-weight: 600; }
 
 /* ---------- Routines: run overlay ---------- */
 .routine-run-overlay, .chore-run-overlay {

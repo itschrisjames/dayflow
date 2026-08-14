@@ -138,10 +138,10 @@ function seedState() {
 
 function seedHabits() {
   const habits = [
-    { id: uid(), name: 'Drink water', freq: { type: 'daily' }, completions: {} },
-    { id: uid(), name: 'Read', freq: { type: 'daily' }, completions: {} },
-    { id: uid(), name: 'Workout', freq: { type: 'weekly', count: 3 }, completions: {} },
-    { id: uid(), name: 'Meditate', freq: { type: 'daily' }, completions: {} },
+    { id: uid(), name: 'Drink water', freq: { type: 'daily' }, completions: {}, sessions: [] },
+    { id: uid(), name: 'Read', freq: { type: 'daily' }, completions: {}, sessions: [] },
+    { id: uid(), name: 'Workout', freq: { type: 'weekly', count: 3 }, completions: {}, sessions: [] },
+    { id: uid(), name: 'Meditate', freq: { type: 'daily' }, completions: {}, sessions: [] },
   ];
   // backfill some plausible history over last 60 days
   const now = new Date();
@@ -154,10 +154,25 @@ function seedHabits() {
       if (Math.random() < chance) h.completions[ds] = true;
     }
   }
+  // seed practice sessions for the two habits that make sense to time
+  const readHabit = habits.find(h => h.name === 'Read');
+  const meditateHabit = habits.find(h => h.name === 'Meditate');
+  Object.keys(readHabit.completions).forEach(ds => {
+    if (Math.random() < 0.7) readHabit.sessions.push({ date: ds, seconds: 600 + Math.round(Math.random() * 900) });
+  });
+  Object.keys(meditateHabit.completions).forEach(ds => {
+    if (Math.random() < 0.8) meditateHabit.sessions.push({ date: ds, seconds: 300 + Math.round(Math.random() * 600) });
+  });
+  readHabit.sessions.sort((a, b) => a.date.localeCompare(b.date));
+  meditateHabit.sessions.sort((a, b) => a.date.localeCompare(b.date));
   return habits;
 }
 
 /* ======================= State ======================= */
+function ensureHabitSessions(s) {
+  (s.habits || []).forEach(h => { if (!h.sessions) h.sessions = []; });
+}
+
 let state = loadState();
 if (!state.view) state.view = { current: 'today', todayOffset: 0, weekOffset: 0 };
 if (!state.routines) state.routines = [];
@@ -165,6 +180,7 @@ if (!state.chores) state.chores = [];
 if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' };
 if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
 if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
+ensureHabitSessions(state);
 
 /* ======================= Theme ======================= */
 const COLOR_SCHEMES = [
@@ -599,7 +615,7 @@ document.getElementById('quickAddForm').addEventListener('submit', (e) => {
   if (!title) return;
 
   if (quickAddMode === 'habit') {
-    state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {} });
+    state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {}, sessions: [] });
     saveState();
     input.value = '';
     setQuickAddMode('task');
@@ -757,6 +773,23 @@ function computeLongestStreak(h) {
   return longest;
 }
 
+/* ---------- Habit practice stats ---------- */
+function habitPR(h) {
+  if (!h.sessions || !h.sessions.length) return null;
+  return h.sessions.reduce((m, s) => Math.max(m, s.seconds), 0);
+}
+function habitAvgSession(h) {
+  if (!h.sessions || !h.sessions.length) return null;
+  return Math.round(h.sessions.reduce((a, s) => a + s.seconds, 0) / h.sessions.length);
+}
+function habitTotalPracticeSeconds(h) {
+  return (h.sessions || []).reduce((a, s) => a + s.seconds, 0);
+}
+function habitSessionsInRange(h, days) {
+  const cutoff = dateStr(addDays(new Date(), -days));
+  return (h.sessions || []).filter(s => s.date >= cutoff);
+}
+
 function renderHabits() {
   const list = document.getElementById('habitsList');
   list.innerHTML = '';
@@ -767,6 +800,8 @@ function renderHabits() {
     card.className = 'habit-card';
     const done = habitDoneOn(h, ds);
     const streak = computeStreak(h);
+    const pr = habitPR(h);
+    const avg = habitAvgSession(h);
     card.innerHTML = `
       <div class="habit-top">
         <div class="habit-check ${done ? 'checked' : ''}">${done ? '✓' : ''}</div>
@@ -774,12 +809,14 @@ function renderHabits() {
           <div class="habit-name">${escapeHtml(h.name)}</div>
           <div class="habit-freq">${habitFreqLabel(h)}</div>
         </div>
+        <button type="button" class="habit-practice-btn" aria-label="Time a practice session">▶</button>
         <div class="habit-streak">
           <div class="n">${streak}</div>
           <div class="lbl">streak</div>
         </div>
       </div>
       <div class="heatmap" data-id="${h.id}"></div>
+      ${pr != null ? `<div class="habit-practice-meta">🏆 PR <span class="pr">${fmtMinSec(pr)}</span> · avg ${fmtMinSec(avg)} · total ${fmtMinSec(habitTotalPracticeSeconds(h))}</div>` : ''}
     `;
     const checkEl = card.querySelector('.habit-check');
     checkEl.addEventListener('click', () => {
@@ -795,6 +832,7 @@ function renderHabits() {
       renderHeatmap(card.querySelector('.heatmap'), h);
     });
     card.querySelector('.habit-name').addEventListener('click', () => openHabitSheet(h));
+    card.querySelector('.habit-practice-btn').addEventListener('click', () => startHabitTimer(h));
     list.appendChild(card);
     renderHeatmap(card.querySelector('.heatmap'), h);
   });
@@ -855,7 +893,7 @@ document.getElementById('habitSaveBtn').addEventListener('click', () => {
     activeHabit.name = name;
     activeHabit.freq = freq;
   } else {
-    state.habits.push({ id: uid(), name, freq, completions: {} });
+    state.habits.push({ id: uid(), name, freq, completions: {}, sessions: [] });
   }
   saveState();
   closeSheets();
@@ -929,6 +967,46 @@ function renderStats() {
     row.innerHTML = `<span>${escapeHtml(h.name)}</span><span class="sv">current ${computeStreak(h)} · best ${computeLongestStreak(h)}</span>`;
     table.appendChild(row);
   });
+
+  renderPracticeStats();
+}
+
+/* ---------- Practice records (motivating stats for timed habits) ---------- */
+function renderPracticeStats() {
+  const block = document.getElementById('practiceBlock');
+  const timedHabits = state.habits.filter(h => h.sessions && h.sessions.length);
+  if (!timedHabits.length) { block.hidden = true; return; }
+  block.hidden = false;
+
+  const totalAllTime = timedHabits.reduce((a, h) => a + habitTotalPracticeSeconds(h), 0);
+  const totalThisWeek = timedHabits.reduce((a, h) => a + habitSessionsInRange(h, 7).reduce((s, x) => s + x.seconds, 0), 0);
+  const sessionsThisWeek = timedHabits.reduce((a, h) => a + habitSessionsInRange(h, 7).length, 0);
+
+  let bestHabit = null, bestSeconds = 0;
+  timedHabits.forEach(h => {
+    const pr = habitPR(h);
+    if (pr > bestSeconds) { bestSeconds = pr; bestHabit = h; }
+  });
+
+  const cards = document.getElementById('practiceCards');
+  cards.innerHTML = `
+    <div class="stat-card"><div class="val">${fmtMinSec(totalAllTime)}</div><div class="lbl">Total practice time</div></div>
+    <div class="stat-card"><div class="val">${fmtMinSec(totalThisWeek)}</div><div class="lbl">This week</div></div>
+    <div class="stat-card"><div class="val">${bestHabit ? fmtMinSec(bestSeconds) : '—'}</div><div class="lbl">${bestHabit ? `Best session · ${escapeHtml(bestHabit.name)}` : 'Best session'}</div></div>
+    <div class="stat-card"><div class="val">${sessionsThisWeek}</div><div class="lbl">Sessions this week</div></div>
+  `;
+
+  const table = document.getElementById('practiceTable');
+  table.innerHTML = '';
+  timedHabits
+    .slice()
+    .sort((a, b) => habitTotalPracticeSeconds(b) - habitTotalPracticeSeconds(a))
+    .forEach(h => {
+      const row = document.createElement('div');
+      row.className = 'streak-row';
+      row.innerHTML = `<span>${escapeHtml(h.name)}</span><span class="sv">PR ${fmtMinSec(habitPR(h))} · avg ${fmtMinSec(habitAvgSession(h))} · ${h.sessions.length} sessions</span>`;
+      table.appendChild(row);
+    });
 }
 
 /* ======================= Lists sheet ======================= */
@@ -1053,7 +1131,7 @@ function openRoutineEditSheet(r) {
   document.getElementById('routineDeleteBtn').hidden = !r;
   document.getElementById('stepTextInput').value = '';
   stepDurDraft = 60;
-  updateStepDurLabel();
+  updateStepDurBtn();
   renderWorkingSteps();
   openSheet('routineEditSheet');
 }
@@ -1062,9 +1140,77 @@ document.getElementById('routineRemindClearBtn').addEventListener('click', () =>
   document.getElementById('routineRemindInput').value = '';
 });
 
-function updateStepDurLabel() { document.getElementById('stepDurLabel').textContent = stepDurDraft + 's'; }
-document.getElementById('stepDurMinus').addEventListener('click', () => { stepDurDraft = Math.max(15, stepDurDraft - 15); updateStepDurLabel(); });
-document.getElementById('stepDurPlus').addEventListener('click', () => { stepDurDraft = Math.min(1800, stepDurDraft + 15); updateStepDurLabel(); });
+function updateStepDurBtn() { document.getElementById('stepDurBtn').textContent = fmtMinSec(stepDurDraft); }
+
+/* ---------- iOS-style scrollable wheel picker ---------- */
+const WHEEL_ROW_H = 40;
+
+function buildWheelColumn(container, values, formatFn, initialValue) {
+  container.innerHTML = '';
+  values.forEach(v => {
+    const item = document.createElement('div');
+    item.className = 'wheel-item';
+    item.textContent = formatFn(v);
+    container.appendChild(item);
+  });
+  const state = { values, index: Math.max(0, values.indexOf(initialValue)) };
+
+  function applyCenterStyles() {
+    const items = container.children;
+    for (let i = 0; i < items.length; i++) {
+      const dist = Math.abs(i - state.index);
+      items[i].classList.toggle('wp-center', i === state.index);
+      items[i].style.opacity = i === state.index ? '1' : String(Math.max(0.22, 1 - dist * 0.3));
+    }
+  }
+
+  let scrollTimer = null;
+  container.addEventListener('scroll', () => {
+    const idx = Math.round(container.scrollTop / WHEEL_ROW_H);
+    state.index = Math.max(0, Math.min(values.length - 1, idx));
+    applyCenterStyles();
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      container.scrollTo({ top: state.index * WHEEL_ROW_H, behavior: 'smooth' });
+    }, 120);
+  }, { passive: true });
+
+  container.scrollTop = state.index * WHEEL_ROW_H;
+  applyCenterStyles();
+
+  return {
+    getValue: () => state.values[state.index],
+    setValue: (v) => {
+      state.index = Math.max(0, values.indexOf(v));
+      container.scrollTop = state.index * WHEEL_ROW_H;
+      applyCenterStyles();
+    },
+  };
+}
+
+const MIN_VALUES = Array.from({ length: 31 }, (_, i) => i);   // 0–30 minutes
+const SEC_VALUES = Array.from({ length: 60 }, (_, i) => i);   // 0–59 seconds
+let wheelMinCtrl = null, wheelSecCtrl = null;
+
+function openDurationPicker() {
+  const mins = Math.floor(stepDurDraft / 60);
+  const secs = stepDurDraft % 60;
+  wheelMinCtrl = buildWheelColumn(document.getElementById('wheelMin'), MIN_VALUES, (v) => String(v), Math.min(mins, 30));
+  wheelSecCtrl = buildWheelColumn(document.getElementById('wheelSec'), SEC_VALUES, (v) => pad2(v), secs);
+  openSheet('durationPickerSheet');
+}
+
+document.getElementById('stepDurBtn').addEventListener('click', openDurationPicker);
+
+document.getElementById('durationSetBtn').addEventListener('click', () => {
+  const m = wheelMinCtrl ? wheelMinCtrl.getValue() : 0;
+  const s = wheelSecCtrl ? wheelSecCtrl.getValue() : 0;
+  let total = m * 60 + s;
+  if (total < 5) total = 5;
+  stepDurDraft = total;
+  updateStepDurBtn();
+  document.getElementById('durationPickerSheet').hidden = true;
+});
 
 function renderWorkingSteps() {
   const list = document.getElementById('routineStepsList');
@@ -1088,7 +1234,7 @@ document.getElementById('addStepBtn').addEventListener('click', () => {
   workingSteps.push({ id: uid(), text, seconds: stepDurDraft });
   input.value = '';
   stepDurDraft = 60;
-  updateStepDurLabel();
+  updateStepDurBtn();
   renderWorkingSteps();
 });
 
@@ -1317,6 +1463,57 @@ document.getElementById('choreDoneBtn').addEventListener('click', () => stopChor
 document.getElementById('choreCancelBtn').addEventListener('click', () => stopChoreTimer(false));
 document.getElementById('choreCloseBtn').addEventListener('click', () => stopChoreTimer(false));
 
+/* ======================= Habit timer ======================= */
+let habitTimerRunning = null, habitTimerStartTs = 0, habitTimerInterval = null;
+
+function startHabitTimer(h) {
+  habitTimerRunning = h;
+  habitTimerStartTs = Date.now();
+  document.getElementById('habitRunName').textContent = h.name;
+  const pr = habitPR(h);
+  document.getElementById('habitAvgLine').innerHTML = pr != null
+    ? `Personal best: <span class="avg-val">${fmtMinSec(pr)}</span>`
+    : `First timed session — let's set a record`;
+  document.getElementById('habitStopwatchNum').textContent = '0:00';
+  document.getElementById('habitRunOverlay').hidden = false;
+  clearInterval(habitTimerInterval);
+  habitTimerInterval = setInterval(habitTimerTick, 1000);
+}
+
+function habitTimerTick() {
+  const elapsed = Math.round((Date.now() - habitTimerStartTs) / 1000);
+  document.getElementById('habitStopwatchNum').textContent = fmtMinSec(elapsed);
+}
+
+function stopHabitTimer(save) {
+  clearInterval(habitTimerInterval);
+  const elapsed = Math.round((Date.now() - habitTimerStartTs) / 1000);
+  document.getElementById('habitRunOverlay').hidden = true;
+  if (save && habitTimerRunning && elapsed >= 3) {
+    const h = habitTimerRunning;
+    const prevPR = habitPR(h);
+    const ds = todayStr();
+    h.sessions.push({ date: ds, seconds: elapsed });
+    const wasAlreadyDone = habitDoneOn(h, ds);
+    h.completions[ds] = true;
+    saveState();
+
+    if (prevPR == null) {
+      toast(`🏆 First session logged: ${fmtMinSec(elapsed)} — that's your new record`);
+    } else if (elapsed > prevPR) {
+      toast(`🏆 New personal best! ${fmtMinSec(elapsed)} (previous: ${fmtMinSec(prevPR)})`);
+    } else {
+      toast(`Logged ${fmtMinSec(elapsed)} — PR is still ${fmtMinSec(prevPR)}` + (wasAlreadyDone ? '' : ` · “${h.name}” checked off for today`));
+    }
+    renderAll();
+  }
+  habitTimerRunning = null;
+}
+
+document.getElementById('habitDoneRunBtn').addEventListener('click', () => stopHabitTimer(true));
+document.getElementById('habitCancelBtn').addEventListener('click', () => stopHabitTimer(false));
+document.getElementById('habitRunCloseBtn').addEventListener('click', () => stopHabitTimer(false));
+
 /* ======================= Settings sheet ======================= */
 document.getElementById('settingsBtn').addEventListener('click', () => { applyTheme(); renderRemindersToggle(); openSheet('settingsSheet'); });
 
@@ -1431,10 +1628,11 @@ document.getElementById('importFile').addEventListener('change', (e) => {
       state = data;
       if (!state.view) state.view = { current: 'today', todayOffset: 0, weekOffset: 0 };
       if (!state.routines) state.routines = [];
-if (!state.chores) state.chores = [];
-if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' };
-if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
-if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
+      if (!state.chores) state.chores = [];
+      if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' };
+      if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
+      if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
+      ensureHabitSessions(state);
       saveState();
       applyTheme();
       renderAll();

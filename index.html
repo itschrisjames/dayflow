@@ -88,6 +88,11 @@
           <div class="section-label">Streaks</div>
           <div id="streakTable"></div>
         </div>
+        <div class="stat-block" id="practiceBlock" hidden>
+          <div class="section-label">Practice records</div>
+          <div class="stat-cards" id="practiceCards"></div>
+          <div id="practiceTable" style="margin-top:8px;"></div>
+        </div>
       </div>
     </section>
 
@@ -201,17 +206,28 @@
     <div id="routineStepsList" class="routine-steps-list"></div>
     <div class="step-add-row">
       <input id="stepTextInput" type="text" placeholder="Add a step…" maxlength="80">
-      <div class="stepper step-dur-stepper">
-        <button type="button" id="stepDurMinus" class="stepper-btn">−</button>
-        <span id="stepDurLabel">60s</span>
-        <button type="button" id="stepDurPlus" class="stepper-btn">+</button>
-      </div>
+      <button type="button" id="stepDurBtn" class="dur-picker-btn">1:00</button>
       <button type="button" id="addStepBtn" class="pill-btn accent small">Add</button>
     </div>
     <div class="sheet-actions">
       <button id="routineDeleteBtn" class="pill-btn danger" hidden>Delete routine</button>
     </div>
     <button id="routineSaveBtn" class="primary-btn">Save routine</button>
+  </div>
+</div>
+
+<div id="durationPickerSheet" class="sheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Step duration</h2>
+    <div class="wheel-picker">
+      <div class="wheel-highlight"></div>
+      <div class="wheel-col" id="wheelMin"></div>
+      <div class="wheel-unit">min</div>
+      <div class="wheel-col" id="wheelSec"></div>
+      <div class="wheel-unit">sec</div>
+    </div>
+    <button id="durationSetBtn" class="primary-btn">Set</button>
   </div>
 </div>
 
@@ -274,6 +290,24 @@
     <div class="run-controls">
       <button id="choreCancelBtn" class="pill-btn">Cancel</button>
       <button id="choreDoneBtn" class="pill-btn accent">✓ Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="habitRunOverlay" class="chore-run-overlay" hidden>
+  <div class="run-top">
+    <button id="habitRunCloseBtn" class="icon-btn" aria-label="Cancel">✕</button>
+    <div class="run-progress" id="habitRunName">Habit</div>
+    <div class="run-spacer"></div>
+  </div>
+  <div class="run-body">
+    <div class="chore-avg-line" id="habitAvgLine"></div>
+    <div class="run-timer-ring chore-ring">
+      <div class="chore-stopwatch-num" id="habitStopwatchNum">0:00</div>
+    </div>
+    <div class="run-controls">
+      <button id="habitCancelBtn" class="pill-btn">Cancel</button>
+      <button id="habitDoneRunBtn" class="pill-btn accent">✓ Done</button>
     </div>
   </div>
 </div>
