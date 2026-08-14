@@ -1,6 +1,20 @@
 (() => {
 'use strict';
 
+/* Ask the server which build it holds, bypassing every cache layer. */
+async function fetchRemoteVersion() {
+  try {
+    const res = await fetch('js/app.js?cb=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return null;
+    const txt = await res.text();
+    const m = txt.match(/APP_VERSION\s*=\s*'([^']+)'/);
+    return m ? m[1] : null;
+  } catch (e) {
+    console.warn('[DayFlow] version check failed', e);
+    return null;
+  }
+}
+
 /* ======================= Safe DOM binding =======================
    A single `document.getElementById(x).addEventListener(...)` against a
    missing element throws, and every listener registered after it silently
@@ -15,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v13';
+const APP_VERSION = 'v16';
 const APP_BUILT = '2026-08-14';
 
 /* ======================= Storage ======================= */
@@ -46,6 +60,12 @@ const minToLabel = (min) => {
   const ap = h >= 12 ? 'PM' : 'AM';
   let h12 = h % 12; if (h12 === 0) h12 = 12;
   return `${h12}:${pad2(m)} ${ap}`;
+};
+// Compact form for the now-marker: the hour gutter is only ~36px wide, and the
+// surrounding hour labels already establish AM/PM.
+const minToShort = (min) => {
+  let h = Math.floor(min / 60) % 12; if (h === 0) h = 12;
+  return `${h}:${pad2(min % 60)}`;
 };
 const timeToMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const minToTimeInput = (min) => `${pad2(Math.floor(min / 60))}:${pad2(min % 60)}`;
@@ -512,17 +532,23 @@ function renderGrid(ds) {
   const dayTasks = state.tasks.filter(t => t.date === ds && t.startMin != null);
   dayTasks.forEach(t => layer.appendChild(renderBlock(t)));
 
-  // now line
+  // "Now" marker: a labelled line so the current time is obvious at a glance,
+  // rather than a hairline you have to go looking for.
   const nowLine = document.getElementById('nowLine');
   const isToday = ds === todayStr();
   if (isToday) {
     const now = new Date();
     const nowMin = now.getHours() * 60 + now.getMinutes();
     if (nowMin >= GRID_START_MIN && nowMin <= GRID_END_MIN) {
-      nowLine.style.display = 'block';
+      nowLine.hidden = false;
       nowLine.style.top = ((nowMin - GRID_START_MIN) * PX_PER_MIN) + 'px';
-    } else nowLine.style.display = 'none';
-  } else nowLine.style.display = 'none';
+      nowLine.innerHTML = `<span class="now-label">${minToShort(nowMin)}</span>`;
+    } else {
+      nowLine.hidden = true;
+    }
+  } else {
+    nowLine.hidden = true;
+  }
 
   // tap-to-place: click empty area of hour row
   document.querySelectorAll('.hour-row.tap-target').forEach(row => {
@@ -2810,17 +2836,7 @@ on('forceUpdateBtn', 'click', async () => {
   // Ask the server what version it holds before tearing anything down, so the
   // button can actually answer "is there an update?" instead of silently
   // reloading into the same build.
-  let remote = null;
-  try {
-    const res = await fetch('js/app.js?cb=' + Date.now(), { cache: 'no-store' });
-    if (res.ok) {
-      const txt = await res.text();
-      const m = txt.match(/APP_VERSION\s*=\s*'([^']+)'/);
-      if (m) remote = m[1];
-    }
-  } catch (e) {
-    console.warn('[DayFlow] version check failed', e);
-  }
+  const remote = await fetchRemoteVersion();
 
   if (remote && remote === APP_VERSION) {
     toast(`Already up to date (${APP_VERSION})`, 3500);
@@ -3171,9 +3187,18 @@ switchView('today');
 
 // Confirm a forced update actually completed, so it isn't a silent no-op.
 if (CAME_FROM_UPDATE) {
-  setTimeout(() => toast(`Updated — you're on ${APP_VERSION}`, 5000), 700);
+  // Don't claim success blindly — the browser may still have served a cached
+  // copy of app.js, in which case we are lying to the user about the version.
+  setTimeout(async () => {
+    const remote = await fetchRemoteVersion();
+    if (remote && remote !== APP_VERSION) {
+      toast(`Still on ${APP_VERSION} — a cached copy was served. Try once more; if it sticks, reopen in Safari and re-add to your Home Screen.`, 10000);
+    } else {
+      toast(`Updated — you're on ${APP_VERSION}`, 5000);
+    }
+  }, 700);
 }
-setInterval(() => { if (state.view.current === 'today') renderGrid(currentTodayDateStr()); }, 60000);
+setInterval(() => { if (state.view.current === 'today') renderGrid(currentTodayDateStr()); }, 20000);
 
 /* ======================= Service worker ======================= */
 if ('serviceWorker' in navigator) {
