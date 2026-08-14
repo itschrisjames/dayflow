@@ -69,6 +69,40 @@ function seedState() {
       { id: uid(), title: 'Read 20 pages', date: yest, startMin: 21 * 60, durationMin: 25, done: true, createdAt: Date.now() - 200000 },
     ],
     habits: seedHabits(),
+    routines: [
+      {
+        id: uid(), name: 'Morning', createdAt: Date.now() - 50000,
+        steps: [
+          { id: uid(), text: 'Drink a glass of water', seconds: 30 },
+          { id: uid(), text: 'Stretch', seconds: 90 },
+          { id: uid(), text: 'Make the bed', seconds: 60 },
+          { id: uid(), text: 'Review today’s plan', seconds: 60 },
+        ]
+      },
+      {
+        id: uid(), name: 'Before Bed', createdAt: Date.now() - 40000,
+        steps: [
+          { id: uid(), text: 'Lay out clothes for tomorrow', seconds: 60 },
+          { id: uid(), text: 'Brush teeth', seconds: 120 },
+          { id: uid(), text: 'Phone on charger, out of reach', seconds: 30 },
+          { id: uid(), text: 'Lights out', seconds: 15 },
+        ]
+      },
+      {
+        id: uid(), name: 'Going to the Gym', createdAt: Date.now() - 30000,
+        steps: [
+          { id: uid(), text: 'Pack gym bag', seconds: 90 },
+          { id: uid(), text: 'Fill water bottle', seconds: 30 },
+          { id: uid(), text: 'Grab headphones + keys', seconds: 20 },
+          { id: uid(), text: 'Head out', seconds: 15 },
+        ]
+      },
+    ],
+    chores: [
+      { id: uid(), name: 'Washing dishes', sessions: [612, 540, 585, 498, 570, 525], createdAt: Date.now() - 90000 },
+      { id: uid(), name: 'Folding laundry', sessions: [900, 780, 840], createdAt: Date.now() - 70000 },
+      { id: uid(), name: 'Tidying desk', sessions: [300, 360, 270, 330], createdAt: Date.now() - 60000 },
+    ],
     lists: [
       {
         id: uid(), name: 'Errands', attachedDate: today,
@@ -97,7 +131,7 @@ function seedState() {
         ]
       },
     ],
-    settings: { theme: 'auto' },
+    settings: { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
 }
@@ -126,8 +160,31 @@ function seedHabits() {
 /* ======================= State ======================= */
 let state = loadState();
 if (!state.view) state.view = { current: 'today', todayOffset: 0, weekOffset: 0 };
+if (!state.routines) state.routines = [];
+if (!state.chores) state.chores = [];
+if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' };
+if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
+if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
 
 /* ======================= Theme ======================= */
+const COLOR_SCHEMES = [
+  { id: 'orange', name: 'Orange', hex: '#ff8c42' },
+  { id: 'blue', name: 'Blue', hex: '#3b82f6' },
+  { id: 'green', name: 'Green', hex: '#22a06b' },
+  { id: 'red', name: 'Red', hex: '#e5533d' },
+  { id: 'purple', name: 'Purple', hex: '#8b5cf6' },
+  { id: 'teal', name: 'Teal', hex: '#14b8a6' },
+  { id: 'pink', name: 'Pink', hex: '#ec4899' },
+  { id: 'amber', name: 'Amber', hex: '#e5a300' },
+];
+
+function contrastTextFor(hex) {
+  const c = hex.replace('#', '');
+  const r = parseInt(c.substr(0, 2), 16), g = parseInt(c.substr(2, 2), 16), b = parseInt(c.substr(4, 2), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.62 ? '#17171a' : '#ffffff';
+}
+
 function applyTheme() {
   const t = state.settings?.theme || 'auto';
   document.documentElement.classList.remove('theme-light', 'theme-dark');
@@ -135,6 +192,38 @@ function applyTheme() {
   if (t === 'dark') document.documentElement.classList.add('theme-dark');
   document.querySelectorAll('#themeOptions .freq-opt').forEach(b => {
     b.classList.toggle('active', b.dataset.theme === t);
+  });
+
+  const schemeId = state.settings?.colorScheme || 'orange';
+  const scheme = COLOR_SCHEMES.find(s => s.id === schemeId) || COLOR_SCHEMES[0];
+  document.documentElement.style.setProperty('--accent', scheme.hex);
+  document.documentElement.style.setProperty('--accent-text', contrastTextFor(scheme.hex));
+
+  renderColorSwatches(schemeId);
+}
+
+function renderColorSwatches(selectedId) {
+  const wrap = document.getElementById('colorSwatches');
+  if (!wrap) return;
+  if (!wrap.childElementCount) {
+    COLOR_SCHEMES.forEach(s => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-swatch';
+      btn.style.background = s.hex;
+      btn.dataset.scheme = s.id;
+      btn.setAttribute('aria-label', s.name);
+      btn.innerHTML = `<span class="cs-check" style="color:${contrastTextFor(s.hex)}">✓</span>`;
+      btn.addEventListener('click', () => {
+        state.settings.colorScheme = s.id;
+        saveState();
+        applyTheme();
+      });
+      wrap.appendChild(btn);
+    });
+  }
+  wrap.querySelectorAll('.color-swatch').forEach(el => {
+    el.classList.toggle('selected', el.dataset.scheme === selectedId);
   });
 }
 
@@ -482,11 +571,43 @@ document.getElementById('blockDeleteBtn').addEventListener('click', () => {
 });
 
 /* ======================= Quick add ======================= */
+let quickAddMode = 'task'; // 'task' | 'habit'
+
+function setQuickAddMode(mode) {
+  quickAddMode = mode;
+  const btn = document.getElementById('quickAddModeBtn');
+  const input = document.getElementById('quickAddInput');
+  if (mode === 'habit') {
+    btn.textContent = '◍';
+    btn.classList.add('habit-mode');
+    input.placeholder = 'New daily habit…';
+  } else {
+    btn.textContent = '✓';
+    btn.classList.remove('habit-mode');
+    input.placeholder = 'Add a task…';
+  }
+}
+
+document.getElementById('quickAddModeBtn').addEventListener('click', () => {
+  setQuickAddMode(quickAddMode === 'task' ? 'habit' : 'task');
+});
+
 document.getElementById('quickAddForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('quickAddInput');
   const title = input.value.trim();
   if (!title) return;
+
+  if (quickAddMode === 'habit') {
+    state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {} });
+    saveState();
+    input.value = '';
+    setQuickAddMode('task');
+    renderAll();
+    toast('Habit added — tracking starts today');
+    return;
+  }
+
   const dateForNew = state.view.current === 'today' ? currentTodayDateStr() : null;
   state.tasks.push({ id: uid(), title, date: dateForNew, startMin: null, durationMin: 30, done: false, createdAt: Date.now() });
   input.value = '';
@@ -882,8 +1003,322 @@ document.getElementById('newListBtn').addEventListener('click', () => {
 
 document.getElementById('listsBtn').addEventListener('click', () => { renderListsSheet(); openSheet('listsSheet'); });
 
+/* ======================= Routines ======================= */
+function fmtMinSec(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60), s = totalSeconds % 60;
+  return `${m}:${pad2(s)}`;
+}
+function routineTotalSeconds(r) { return r.steps.reduce((sum, s) => sum + s.seconds, 0); }
+
+function renderRoutinesSheet() {
+  const wrap = document.getElementById('routinesContainer');
+  wrap.innerHTML = '';
+  state.routines.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'routine-card';
+    card.innerHTML = `
+      <div class="routine-card-head">
+        <div>
+          <div class="rname">${escapeHtml(r.name)}</div>
+          <div class="routine-card-meta">${r.steps.length} step${r.steps.length === 1 ? '' : 's'} · ~${fmtMinSec(routineTotalSeconds(r))}${r.remindAt ? ` · reminder ${minToLabel(timeToMin(r.remindAt))}` : ''}</div>
+        </div>
+      </div>
+      <div class="routine-card-actions">
+        <button class="pill-btn accent" data-act="start">▶ Start</button>
+        <button class="pill-btn" data-act="edit">Edit</button>
+      </div>
+    `;
+    card.querySelector('[data-act="start"]').addEventListener('click', () => {
+      if (!r.steps.length) { toast('Add a step first'); return; }
+      closeSheets();
+      startRoutine(r);
+    });
+    card.querySelector('[data-act="edit"]').addEventListener('click', () => openRoutineEditSheet(r));
+    wrap.appendChild(card);
+  });
+}
+
+document.getElementById('routinesBtn').addEventListener('click', () => { renderRoutinesSheet(); openSheet('routinesSheet'); });
+document.getElementById('newRoutineBtn').addEventListener('click', () => openRoutineEditSheet(null));
+
+let activeRoutine = null;
+let workingSteps = [];
+let stepDurDraft = 60;
+
+function openRoutineEditSheet(r) {
+  activeRoutine = r;
+  document.getElementById('routineNameInput').value = r ? r.name : '';
+  document.getElementById('routineRemindInput').value = r && r.remindAt ? r.remindAt : '';
+  workingSteps = r ? r.steps.map(s => ({ ...s })) : [];
+  document.getElementById('routineDeleteBtn').hidden = !r;
+  document.getElementById('stepTextInput').value = '';
+  stepDurDraft = 60;
+  updateStepDurLabel();
+  renderWorkingSteps();
+  openSheet('routineEditSheet');
+}
+
+document.getElementById('routineRemindClearBtn').addEventListener('click', () => {
+  document.getElementById('routineRemindInput').value = '';
+});
+
+function updateStepDurLabel() { document.getElementById('stepDurLabel').textContent = stepDurDraft + 's'; }
+document.getElementById('stepDurMinus').addEventListener('click', () => { stepDurDraft = Math.max(15, stepDurDraft - 15); updateStepDurLabel(); });
+document.getElementById('stepDurPlus').addEventListener('click', () => { stepDurDraft = Math.min(1800, stepDurDraft + 15); updateStepDurLabel(); });
+
+function renderWorkingSteps() {
+  const list = document.getElementById('routineStepsList');
+  list.innerHTML = '';
+  workingSteps.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'routine-step-row';
+    row.innerHTML = `<span class="rs-idx">${i + 1}</span><span class="rs-text">${escapeHtml(s.text)}</span><span class="rs-dur">${fmtMinSec(s.seconds)}</span><button type="button" class="rs-del" aria-label="Remove">✕</button>`;
+    row.querySelector('.rs-del').addEventListener('click', () => {
+      workingSteps.splice(i, 1);
+      renderWorkingSteps();
+    });
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('addStepBtn').addEventListener('click', () => {
+  const input = document.getElementById('stepTextInput');
+  const text = input.value.trim();
+  if (!text) return;
+  workingSteps.push({ id: uid(), text, seconds: stepDurDraft });
+  input.value = '';
+  stepDurDraft = 60;
+  updateStepDurLabel();
+  renderWorkingSteps();
+});
+
+document.getElementById('routineSaveBtn').addEventListener('click', () => {
+  const name = document.getElementById('routineNameInput').value.trim();
+  if (!name) { toast('Name required'); return; }
+  if (!workingSteps.length) { toast('Add at least one step'); return; }
+  const remindAt = document.getElementById('routineRemindInput').value || null;
+  if (activeRoutine) {
+    activeRoutine.name = name;
+    activeRoutine.steps = workingSteps;
+    if (activeRoutine.remindAt !== remindAt) activeRoutine.lastRemindedDate = null;
+    activeRoutine.remindAt = remindAt;
+  } else {
+    state.routines.push({ id: uid(), name, steps: workingSteps, remindAt, lastRemindedDate: null, createdAt: Date.now() });
+  }
+  saveState();
+  closeSheets();
+  renderRoutinesSheet();
+  openSheet('routinesSheet');
+});
+
+document.getElementById('routineDeleteBtn').addEventListener('click', () => {
+  if (!activeRoutine) return;
+  state.routines = state.routines.filter(x => x.id !== activeRoutine.id);
+  saveState();
+  closeSheets();
+  renderRoutinesSheet();
+  openSheet('routinesSheet');
+});
+
+/* ---------- Routine run mode ---------- */
+let runRoutine = null, runIndex = 0, runRemaining = 0, runInterval = null, runPaused = false, runStartTime = 0;
+const RING_CIRC = 565.48;
+
+function startRoutine(r) {
+  runRoutine = r;
+  runIndex = 0;
+  runStartTime = Date.now();
+  document.getElementById('runDone').hidden = true;
+  document.getElementById('runBody').hidden = false;
+  document.getElementById('routineRunOverlay').hidden = false;
+  loadRunStep();
+}
+
+function loadRunStep() {
+  clearInterval(runInterval);
+  runPaused = false;
+  document.getElementById('runPauseBtn').textContent = 'Pause';
+  const step = runRoutine.steps[runIndex];
+  runRemaining = step.seconds;
+  document.getElementById('runStepTitle').textContent = step.text;
+  document.getElementById('runProgress').textContent = `Step ${runIndex + 1} of ${runRoutine.steps.length}`;
+  document.getElementById('runPrevBtn').disabled = runIndex === 0;
+  document.getElementById('runPrevBtn').style.opacity = runIndex === 0 ? 0.4 : 1;
+  const isLast = runIndex === runRoutine.steps.length - 1;
+  document.getElementById('runNextBtn').textContent = isLast ? 'Finish ›' : 'Skip ›';
+  renderRunDots();
+  updateRunRing(step.seconds);
+  runInterval = setInterval(runTick, 1000);
+}
+
+function renderRunDots() {
+  const wrap = document.getElementById('runDots');
+  wrap.innerHTML = '';
+  runRoutine.steps.forEach((s, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'dot' + (i === runIndex ? ' on' : i < runIndex ? ' done' : '');
+    wrap.appendChild(dot);
+  });
+}
+
+function updateRunRing(total) {
+  const frac = total > 0 ? runRemaining / total : 0;
+  document.getElementById('runRingFg').style.strokeDashoffset = RING_CIRC * (1 - frac);
+  document.getElementById('runTimerNum').textContent = fmtMinSec(runRemaining);
+}
+
+function runTick() {
+  runRemaining--;
+  const step = runRoutine.steps[runIndex];
+  updateRunRing(step.seconds);
+  if (runRemaining <= 0) {
+    clearInterval(runInterval);
+    advanceRunStep();
+  }
+}
+
+function advanceRunStep() {
+  if (runIndex < runRoutine.steps.length - 1) {
+    runIndex++;
+    loadRunStep();
+  } else {
+    finishRun();
+  }
+}
+
+function finishRun() {
+  clearInterval(runInterval);
+  const elapsed = Math.round((Date.now() - runStartTime) / 1000);
+  document.getElementById('runBody').hidden = true;
+  document.getElementById('runDone').hidden = false;
+  document.getElementById('runDoneTime').textContent = `Completed “${escapeHtml(runRoutine.name)}” in ${fmtMinSec(elapsed)}`;
+  toast('Routine complete');
+}
+
+document.getElementById('runPauseBtn').addEventListener('click', () => {
+  runPaused = !runPaused;
+  document.getElementById('runPauseBtn').textContent = runPaused ? 'Resume' : 'Pause';
+  if (runPaused) clearInterval(runInterval);
+  else runInterval = setInterval(runTick, 1000);
+});
+
+document.getElementById('runPrevBtn').addEventListener('click', () => {
+  if (runIndex > 0) { runIndex--; loadRunStep(); }
+});
+document.getElementById('runNextBtn').addEventListener('click', () => {
+  clearInterval(runInterval);
+  advanceRunStep();
+});
+document.getElementById('runCloseBtn').addEventListener('click', () => {
+  clearInterval(runInterval);
+  document.getElementById('routineRunOverlay').hidden = true;
+});
+document.getElementById('runFinishBtn').addEventListener('click', () => {
+  document.getElementById('routineRunOverlay').hidden = true;
+});
+
+/* ======================= Chore timer ======================= */
+const CHORE_HISTORY_CAP = 20;
+
+function choreAverage(c) {
+  if (!c.sessions.length) return null;
+  const recent = c.sessions.slice(-CHORE_HISTORY_CAP);
+  return Math.round(recent.reduce((a, b) => a + b, 0) / recent.length);
+}
+function choreLast(c) { return c.sessions.length ? c.sessions[c.sessions.length - 1] : null; }
+
+function renderChoresSheet() {
+  const wrap = document.getElementById('choresContainer');
+  wrap.innerHTML = '';
+  state.chores.forEach(c => {
+    const avg = choreAverage(c);
+    const last = choreLast(c);
+    const card = document.createElement('div');
+    card.className = 'chore-card';
+    card.innerHTML = `
+      <div class="chore-info">
+        <div class="chore-name">${escapeHtml(c.name)}</div>
+        <div class="chore-meta">${avg != null ? `avg <span class="avg">${fmtMinSec(avg)}</span> · last ${fmtMinSec(last)} · ${c.sessions.length} run${c.sessions.length === 1 ? '' : 's'}` : 'not timed yet'}</div>
+      </div>
+      <div class="chore-actions">
+        <button class="chore-start-btn" data-act="start">▶ Start</button>
+        <button class="chore-del-btn" data-act="del" aria-label="Delete">✕</button>
+      </div>
+    `;
+    card.querySelector('[data-act="start"]').addEventListener('click', () => {
+      closeSheets();
+      startChoreTimer(c);
+    });
+    card.querySelector('[data-act="del"]').addEventListener('click', () => {
+      state.chores = state.chores.filter(x => x.id !== c.id);
+      saveState();
+      renderChoresSheet();
+    });
+    wrap.appendChild(card);
+  });
+}
+
+document.getElementById('choresBtn').addEventListener('click', () => { renderChoresSheet(); openSheet('choresSheet'); });
+
+document.getElementById('addChoreBtn').addEventListener('click', addChoreFromInput);
+document.getElementById('newChoreInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addChoreFromInput(); } });
+function addChoreFromInput() {
+  const input = document.getElementById('newChoreInput');
+  const name = input.value.trim();
+  if (!name) return;
+  state.chores.push({ id: uid(), name, sessions: [], createdAt: Date.now() });
+  input.value = '';
+  saveState();
+  renderChoresSheet();
+}
+
+let choreRunning = null, choreStartTs = 0, choreInterval = null;
+
+function startChoreTimer(c) {
+  choreRunning = c;
+  choreStartTs = Date.now();
+  document.getElementById('choreRunName').textContent = c.name;
+  const avg = choreAverage(c);
+  document.getElementById('choreAvgLine').innerHTML = avg != null
+    ? `Your average: <span class="avg-val">${fmtMinSec(avg)}</span>`
+    : `First time timing this — let's set a baseline`;
+  document.getElementById('choreStopwatchNum').textContent = '0:00';
+  document.getElementById('choreRunOverlay').hidden = false;
+  clearInterval(choreInterval);
+  choreInterval = setInterval(choreTick, 1000);
+}
+
+function choreTick() {
+  const elapsed = Math.round((Date.now() - choreStartTs) / 1000);
+  document.getElementById('choreStopwatchNum').textContent = fmtMinSec(elapsed);
+}
+
+function stopChoreTimer(save) {
+  clearInterval(choreInterval);
+  const elapsed = Math.round((Date.now() - choreStartTs) / 1000);
+  document.getElementById('choreRunOverlay').hidden = true;
+  if (save && choreRunning && elapsed >= 3) {
+    const prevAvg = choreAverage(choreRunning);
+    choreRunning.sessions.push(elapsed);
+    if (choreRunning.sessions.length > CHORE_HISTORY_CAP) choreRunning.sessions.shift();
+    saveState();
+    if (prevAvg != null) {
+      const diff = elapsed - prevAvg;
+      const cmp = diff <= 0 ? `${fmtMinSec(Math.abs(diff))} faster than your average` : `${fmtMinSec(diff)} slower than your average`;
+      toast(`${fmtMinSec(elapsed)} — ${cmp}`);
+    } else {
+      toast(`Logged ${fmtMinSec(elapsed)} — that's your new baseline`);
+    }
+  }
+  choreRunning = null;
+}
+
+document.getElementById('choreDoneBtn').addEventListener('click', () => stopChoreTimer(true));
+document.getElementById('choreCancelBtn').addEventListener('click', () => stopChoreTimer(false));
+document.getElementById('choreCloseBtn').addEventListener('click', () => stopChoreTimer(false));
+
 /* ======================= Settings sheet ======================= */
-document.getElementById('settingsBtn').addEventListener('click', () => { applyTheme(); openSheet('settingsSheet'); });
+document.getElementById('settingsBtn').addEventListener('click', () => { applyTheme(); renderRemindersToggle(); openSheet('settingsSheet'); });
 
 document.querySelectorAll('#themeOptions .freq-opt').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -892,6 +1327,85 @@ document.querySelectorAll('#themeOptions .freq-opt').forEach(btn => {
     applyTheme();
   });
 });
+
+/* ======================= Reminders / notifications ======================= */
+const notifiedTaskKeys = new Set();
+
+function renderRemindersToggle() {
+  const btn = document.getElementById('remindersToggleBtn');
+  const note = document.getElementById('remindersNote');
+  const supported = 'Notification' in window;
+  if (!supported) {
+    btn.textContent = 'Unsupported';
+    btn.disabled = true;
+    note.textContent = 'This browser doesn’t support notifications. Reminders will still show as in-app banners while DayFlow is open.';
+    return;
+  }
+  const on = state.settings.remindersEnabled && Notification.permission === 'granted';
+  btn.textContent = on ? 'On' : 'Off';
+  btn.classList.toggle('active', on);
+  if (Notification.permission === 'denied') {
+    note.textContent = 'Notifications are blocked for DayFlow in your browser/OS settings. Enable them there, then toggle this back on.';
+  } else {
+    note.textContent = 'Get notified when a time-blocked task starts, or when a routine’s reminder time hits. Works best when DayFlow is installed to your Home Screen and open in the background.';
+  }
+}
+
+document.getElementById('remindersToggleBtn').addEventListener('click', async () => {
+  if (!('Notification' in window)) return;
+  if (!state.settings.remindersEnabled) {
+    let perm = Notification.permission;
+    if (perm === 'default') {
+      try { perm = await Notification.requestPermission(); } catch (e) { perm = 'denied'; }
+    }
+    if (perm === 'granted') {
+      state.settings.remindersEnabled = true;
+      saveState();
+      toast('Reminders on');
+    } else {
+      toast('Notification permission denied');
+    }
+  } else {
+    state.settings.remindersEnabled = false;
+    saveState();
+    toast('Reminders off');
+  }
+  renderRemindersToggle();
+});
+
+function fireReminder(title, body) {
+  if (state.settings.remindersEnabled && 'Notification' in window && Notification.permission === 'granted') {
+    try { new Notification(title, { body, icon: 'icons/icon-192.png' }); } catch (e) { /* ignore */ }
+  }
+  toast(body);
+}
+
+function checkReminders() {
+  if (!state.settings.remindersEnabled) return;
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const ds = todayStr();
+
+  state.tasks.forEach(t => {
+    if (t.date !== ds || t.startMin == null || t.done) return;
+    const key = ds + '_' + t.id;
+    if (t.startMin === nowMin && !notifiedTaskKeys.has(key)) {
+      notifiedTaskKeys.add(key);
+      fireReminder('Time to start', t.title);
+    }
+  });
+
+  state.routines.forEach(r => {
+    if (!r.remindAt) return;
+    if (r.lastRemindedDate === ds) return;
+    if (timeToMin(r.remindAt) === nowMin) {
+      r.lastRemindedDate = ds;
+      saveState();
+      fireReminder('Routine time', `Time for your “${r.name}” routine`);
+    }
+  });
+}
+setInterval(checkReminders, 20000);
 
 document.getElementById('exportBtn').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -916,6 +1430,11 @@ document.getElementById('importFile').addEventListener('change', (e) => {
       if (!data.tasks || !data.habits) throw new Error('bad format');
       state = data;
       if (!state.view) state.view = { current: 'today', todayOffset: 0, weekOffset: 0 };
+      if (!state.routines) state.routines = [];
+if (!state.chores) state.chores = [];
+if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' };
+if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
+if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
       saveState();
       applyTheme();
       renderAll();

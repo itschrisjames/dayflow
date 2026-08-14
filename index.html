@@ -22,7 +22,11 @@
   <header class="topbar">
     <button id="listsBtn" class="icon-btn" aria-label="Lists">☰</button>
     <h1 id="viewTitle">Today</h1>
-    <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙</button>
+    <div class="topbar-right">
+      <button id="routinesBtn" class="icon-btn" aria-label="Routines">⏱</button>
+      <button id="choresBtn" class="icon-btn" aria-label="Chore timer">⏳</button>
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙</button>
+    </div>
   </header>
 
   <!-- ===== Views ===== -->
@@ -91,6 +95,7 @@
 
   <!-- ===== Quick Add (always visible) ===== -->
   <form id="quickAddForm" class="quick-add">
+    <button type="button" id="quickAddModeBtn" class="quick-add-mode" aria-label="Switch between task and habit">✓</button>
     <input id="quickAddInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="140">
     <button type="submit" class="quick-add-btn" aria-label="Add">＋</button>
   </form>
@@ -170,10 +175,118 @@
   </div>
 </div>
 
+<div id="routinesSheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sheet-header-row">
+      <h2>Routines</h2>
+      <button id="newRoutineBtn" class="pill-btn accent small">+ New</button>
+    </div>
+    <div id="routinesContainer"></div>
+  </div>
+</div>
+
+<div id="routineEditSheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <input id="routineNameInput" type="text" class="sheet-input" placeholder="Routine name (e.g. Morning)" maxlength="60">
+    <div class="sheet-row">
+      <label>Remind me at</label>
+      <div class="reminder-time-row">
+        <input id="routineRemindInput" type="time" step="900">
+        <button type="button" id="routineRemindClearBtn" class="reminder-clear-btn" aria-label="Clear reminder">✕</button>
+      </div>
+    </div>
+    <div class="section-label" style="padding-left:0">Steps</div>
+    <div id="routineStepsList" class="routine-steps-list"></div>
+    <div class="step-add-row">
+      <input id="stepTextInput" type="text" placeholder="Add a step…" maxlength="80">
+      <div class="stepper step-dur-stepper">
+        <button type="button" id="stepDurMinus" class="stepper-btn">−</button>
+        <span id="stepDurLabel">60s</span>
+        <button type="button" id="stepDurPlus" class="stepper-btn">+</button>
+      </div>
+      <button type="button" id="addStepBtn" class="pill-btn accent small">Add</button>
+    </div>
+    <div class="sheet-actions">
+      <button id="routineDeleteBtn" class="pill-btn danger" hidden>Delete routine</button>
+    </div>
+    <button id="routineSaveBtn" class="primary-btn">Save routine</button>
+  </div>
+</div>
+
+<div id="routineRunOverlay" class="routine-run-overlay" hidden>
+  <div class="run-top">
+    <button id="runCloseBtn" class="icon-btn" aria-label="Close">✕</button>
+    <div class="run-progress" id="runProgress">Step 1 of 1</div>
+    <div class="run-spacer"></div>
+  </div>
+  <div class="run-body" id="runBody">
+    <div class="run-dots" id="runDots"></div>
+    <div class="run-step-title" id="runStepTitle">Step</div>
+    <div class="run-timer-ring">
+      <svg viewBox="0 0 200 200" class="run-ring-svg">
+        <circle cx="100" cy="100" r="90" class="ring-bg"></circle>
+        <circle cx="100" cy="100" r="90" class="ring-fg" id="runRingFg"></circle>
+      </svg>
+      <div class="run-timer-num" id="runTimerNum">60</div>
+    </div>
+    <div class="run-controls">
+      <button id="runPrevBtn" class="pill-btn">‹ Prev</button>
+      <button id="runPauseBtn" class="pill-btn accent">Pause</button>
+      <button id="runNextBtn" class="pill-btn">Skip ›</button>
+    </div>
+  </div>
+  <div class="run-done" id="runDone" hidden>
+    <div class="run-done-check">✓</div>
+    <div class="run-done-title">Routine complete</div>
+    <div class="run-done-time" id="runDoneTime"></div>
+    <button id="runFinishBtn" class="primary-btn">Done</button>
+  </div>
+</div>
+
+<div id="choresSheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sheet-header-row">
+      <h2>Chore Timer</h2>
+    </div>
+    <p class="settings-note" style="margin:0 0 14px;text-align:left;">Time a task once, and DayFlow learns how long it usually takes you — so next time you know what you're actually signing up for.</p>
+    <div id="choresContainer"></div>
+    <div class="list-add-row" style="margin-top:4px;">
+      <input type="text" id="newChoreInput" placeholder="Add a chore (e.g. Washing dishes)…" maxlength="60">
+      <button type="button" id="addChoreBtn">＋</button>
+    </div>
+  </div>
+</div>
+
+<div id="choreRunOverlay" class="chore-run-overlay" hidden>
+  <div class="run-top">
+    <button id="choreCloseBtn" class="icon-btn" aria-label="Cancel">✕</button>
+    <div class="run-progress" id="choreRunName">Chore</div>
+    <div class="run-spacer"></div>
+  </div>
+  <div class="run-body">
+    <div class="chore-avg-line" id="choreAvgLine"></div>
+    <div class="run-timer-ring chore-ring">
+      <div class="chore-stopwatch-num" id="choreStopwatchNum">0:00</div>
+    </div>
+    <div class="run-controls">
+      <button id="choreCancelBtn" class="pill-btn">Cancel</button>
+      <button id="choreDoneBtn" class="pill-btn accent">✓ Done</button>
+    </div>
+  </div>
+</div>
+
 <div id="settingsSheet" class="sheet" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <h2>Settings</h2>
+    <div class="sheet-row">
+      <label>Reminders</label>
+      <button type="button" id="remindersToggleBtn" class="freq-opt" style="flex:none;padding:9px 18px;">Off</button>
+    </div>
+    <p class="settings-note" id="remindersNote" style="text-align:left;margin:2px 0 0;">Get notified when a time-blocked task starts, or when a routine's reminder time hits. Works best when DayFlow is installed to your Home Screen and open in the background.</p>
     <div class="sheet-row">
       <label>Appearance</label>
       <div class="freq-options" id="themeOptions">
@@ -181,6 +294,10 @@
         <button type="button" class="freq-opt" data-theme="light">Light</button>
         <button type="button" class="freq-opt" data-theme="dark">Dark</button>
       </div>
+    </div>
+    <div class="sheet-row color-row">
+      <label>Accent color</label>
+      <div class="color-swatches" id="colorSwatches"></div>
     </div>
     <div class="sheet-actions">
       <button id="exportBtn" class="pill-btn accent">Export JSON</button>
