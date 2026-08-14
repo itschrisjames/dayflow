@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dayflow-cache-v1';
+const CACHE_NAME = 'dayflow-cache-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -25,18 +25,23 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Network-first for the app's own files, so a new deploy is picked up the
+// next time the device has connectivity — falling back to the cached copy
+// only when offline. (Icons/manifest rarely change, but are cheap either way.)
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return res;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
+    fetch(event.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return res;
+      })
+      .catch(() =>
+        caches.match(event.request).then((cached) => cached || caches.match('./index.html'))
+      )
   );
 });
