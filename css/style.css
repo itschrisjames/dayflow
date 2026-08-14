@@ -935,3 +935,7 @@ button { font-family: inherit; }
 }
 .time-chip:active { background: var(--accent); color: var(--accent-text); }
 .inbox-item .swipe-content { gap: 8px; }
+
+/* Undo lives in the top bar and only appears when there is something to undo */
+.undo-btn { color: var(--accent); }
+.undo-btn:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }

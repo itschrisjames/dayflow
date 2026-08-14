@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v17';
 const APP_BUILT = '2026-08-14';
 
 /* ======================= Storage ======================= */
@@ -44,8 +44,60 @@ function loadState() {
   return blankState();
 }
 
-function saveState() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+/* ======================= Undo =======================
+   Every mutation funnels through saveState(), so snapshotting the *previous*
+   state there covers the whole app without touching each call site. State is
+   a few KB of JSON, so keeping a short stack of copies is cheap and exact —
+   no per-action inverse logic to get subtly wrong. */
+const UNDO_LIMIT = 25;
+const undoStack = [];
+let lastSnapshot = null;
+
+function saveState(label) {
+  const snap = lastSnapshot;
+  lastSnapshot = JSON.stringify(state);
+  localStorage.setItem(STORE_KEY, lastSnapshot);
+
+  // `silent` covers housekeeping saves (migrations, reminder bookkeeping,
+  // chat log) that a user would never think of as an action to undo.
+  if (snap && label !== 'silent') {
+    undoStack.push({ snap, label: typeof label === 'string' ? label : '' });
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    renderUndoBtn();
+  }
+}
+
+function renderUndoBtn() {
+  const btn = document.getElementById('undoBtn');
+  if (!btn) return;
+  btn.hidden = undoStack.length === 0;
+  const last = undoStack[undoStack.length - 1];
+  btn.setAttribute('aria-label', last && last.label ? `Undo ${last.label}` : 'Undo');
+}
+
+function undoLast() {
+  const entry = undoStack.pop();
+  if (!entry) { toast('Nothing to undo'); return; }
+  // Keep where the user is looking. The snapshot carries whatever view was
+  // stored at the time, so restoring it wholesale could silently switch tabs
+  // and leave the visible one showing pre-undo data.
+  const here = { ...state.view };
+  try {
+    state = JSON.parse(entry.snap);
+  } catch (e) {
+    toast('Could not undo that');
+    return;
+  }
+  state.view = here;
+  ensureHabitSessions(state);
+  ensureNewCollections(state);
+  lastSnapshot = entry.snap;
+  localStorage.setItem(STORE_KEY, entry.snap);
+  renderUndoBtn();
+  applyTheme();
+  closeSheets();
+  renderAll();
+  toast(entry.label ? `Undid ${entry.label}` : 'Undone');
 }
 
 /* ======================= Utils ======================= */
@@ -171,8 +223,11 @@ function icon(name, size = 20, opts = {}) {
   return `<svg class="ico" viewBox="0 0 24 24" width="${size}" height="${size}" fill="${fill}" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 }
 
-const GRID_START_MIN = 6 * 60;   // 6:00 AM
-const GRID_END_MIN = 23 * 60;    // 11:00 PM
+// The grid covers the whole day. A 6am–11pm window meant the "now" marker
+// simply had nowhere to render late at night or early in the morning, and
+// nothing could be scheduled outside those hours either.
+const GRID_START_MIN = 0;
+const GRID_END_MIN = 24 * 60;
 const PX_PER_MIN = 56 / 60;
 
 function toast(msg, ms) {
@@ -236,7 +291,7 @@ ensureHabitSessions(state);
 ensureNewCollections(state);
 // Persist any schema migration immediately, so the stored copy matches what
 // the app is actually working with rather than waiting for the next edit.
-saveState();
+saveState('silent');
 
 /* ======================= Theme ======================= */
 const COLOR_SCHEMES = [
@@ -451,6 +506,8 @@ function renderScheduleToggle(ds) {
   }
 }
 
+on('undoBtn', 'click', undoLast);
+
 on('scheduleToggle', 'click', () => {
   state.settings.showSchedule = !state.settings.showSchedule;
   saveState();
@@ -614,7 +671,7 @@ document.addEventListener('pointerdown', (e) => {
 function deleteTaskById(id) {
   closeAnyOpenSwipe();
   state.tasks = state.tasks.filter(x => x.id !== id);
-  saveState();
+  saveState('delete');
   renderAll();
   toast('Task deleted');
 }
@@ -779,7 +836,7 @@ function placeTask(t, ds, min) {
   t.startMin = min;
   delete t.proposedMin;      // the suggestion has been acted on
   if (!t.durationMin) t.durationMin = 30;
-  saveState();
+  saveState('scheduling');
   renderAll();
 }
 
@@ -1372,7 +1429,7 @@ on('habitClearRecordsBtn', 'click', () => {
 on('habitDeleteBtn', 'click', () => {
   if (!activeHabit) return;
   state.habits = state.habits.filter(x => x.id !== activeHabit.id);
-  saveState();
+  saveState('delete');
   closeSheets();
   renderAll();
 });
@@ -1755,7 +1812,7 @@ on('routineSaveBtn', 'click', () => {
 on('routineDeleteBtn', 'click', () => {
   if (!activeRoutine) return;
   state.routines = state.routines.filter(x => x.id !== activeRoutine.id);
-  saveState();
+  saveState('delete');
   closeSheets();
   renderRoutinesView();
 });
@@ -2354,7 +2411,7 @@ const CHAT_CAP = 120;
 function pushChat(role, text) {
   state.chatLog.push({ role, text, ts: Date.now() });
   if (state.chatLog.length > CHAT_CAP) state.chatLog = state.chatLog.slice(-CHAT_CAP);
-  saveState();
+  saveState('silent');
 }
 
 function renderChat(scroll = true) {
@@ -2946,7 +3003,7 @@ function checkReminders() {
     if (r.lastRemindedDate === ds) return;
     if (timeToMin(r.remindAt) === nowMin) {
       r.lastRemindedDate = ds;
-      saveState();
+      saveState('silent');
       fireReminder('Routine time', `Time for your “${r.name}” routine`);
     }
   });
@@ -3022,7 +3079,7 @@ on('clearPracticeBtn', 'click', () => {
   if (!confirm(`Clear all ${sessionCount} timed practice records? Habits, streaks and chores stay — only the recorded times go.`)) return;
   state.habits.forEach(h => { h.sessions = []; });
   state.chores.forEach(c => { c.sessions = []; });
-  saveState();
+  saveState('clearing records');
   renderAll();
   toast('Practice records cleared');
 });
@@ -3031,10 +3088,12 @@ on('clearSampleBtn', 'click', () => {
   if (!confirm('Remove all sample tasks, habits, routines, chores and lists? Your settings stay. This gives you a blank slate.')) return;
   const settings = state.settings;
   const view = state.view;
+  const wipeSnap = lastSnapshot;
   state = emptyState();
   state.settings = settings;
   state.view = view;
-  saveState();
+  lastSnapshot = wipeSnap;      // so the undo entry restores what was wiped
+  saveState('removing sample data');
   applyTheme();
   closeSheets();
   renderAll();
@@ -3043,8 +3102,10 @@ on('clearSampleBtn', 'click', () => {
 
 on('resetBtn', 'click', () => {
   if (!confirm('Erase everything, including settings? This cannot be undone.')) return;
+  const eraseSnap = lastSnapshot;
   state = blankState();
-  saveState();
+  lastSnapshot = eraseSnap;
+  saveState('erasing everything');
   applyTheme();
   closeSheets();
   renderAll();
