@@ -10,7 +10,7 @@ function loadState() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) { console.warn('load failed', e); }
-  return seedState();
+  return blankState();
 }
 
 function saveState() {
@@ -36,6 +36,45 @@ const WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const WDFULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+/* ======================= Icons =======================
+   Inline stroke icons (24px grid, currentColor) so they inherit theme + accent
+   colour and stay crisp at any size. No emoji, no icon font, no network. */
+const ICON_PATHS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/>',
+  calendar: '<rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/>',
+  target: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9.5"/>',
+  sparkle: '<path d="M12 3.2l1.7 4.8 4.8 1.7-4.8 1.7L12 16.2l-1.7-4.8L5.5 9.7l4.8-1.7L12 3.2Z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>',
+  chart: '<path d="M3 21h18"/><path d="M6.5 21v-6M12 21V6M17.5 21v-9"/>',
+  list: '<path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  repeat: '<path d="m17 2.5 3.5 3.5L17 9.5"/><path d="M3.5 11.5v-1a4 4 0 0 1 4-4h13"/><path d="m7 21.5-3.5-3.5L7 14.5"/><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13"/>',
+  timer: '<path d="M9.5 2.5h5"/><path d="M12 14v-4"/><circle cx="12" cy="14" r="7.75"/>',
+  sliders: '<path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M1.5 15h5M9.5 8h5M17.5 17h5"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10.5v1.5a7 7 0 0 1-14 0v-1.5"/><path d="M12 19v3"/>',
+  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/>',
+  play: '<path d="M7.5 4.8v14.4l12-7.2-12-7.2Z"/>',
+  trash: '<path d="M3.5 6h17M8.5 6V3.8h7V6M18.5 6l-1 14.2h-11L5.5 6"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  check: '<path d="M20 6.5 9.2 17.3 4 12.1"/>',
+  chevronLeft: '<path d="m14.5 18.5-6.5-6.5 6.5-6.5"/>',
+  chevronRight: '<path d="m9.5 5.5 6.5 6.5-6.5 6.5"/>',
+  chevronDown: '<path d="m5.5 9 6.5 6.5L18.5 9"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  arrowUp: '<path d="M12 19.5v-15M5 11.5l7-7 7 7"/>',
+  download: '<path d="M12 3v12M7 10.5l5 5 5-5M4.5 21h15"/>',
+  alarm: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="m4.5 3-2.2 2.2M19.5 3l2.2 2.2"/>',
+  trophy: '<path d="M6.5 3.5h11v6.5a5.5 5.5 0 0 1-11 0V3.5Z"/><path d="M6.5 5.5h-2a2.5 2.5 0 0 0 2.5 2.5M17.5 5.5h2a2.5 2.5 0 0 1-2.5 2.5"/><path d="M9 20.5h6M12 16v4.5"/>',
+  grip: '<circle cx="9" cy="6" r=".9"/><circle cx="15" cy="6" r=".9"/><circle cx="9" cy="12" r=".9"/><circle cx="15" cy="12" r=".9"/><circle cx="9" cy="18" r=".9"/><circle cx="15" cy="18" r=".9"/>',
+};
+
+function icon(name, size = 20, opts = {}) {
+  const p = ICON_PATHS[name];
+  if (!p) return '';
+  const fill = opts.fill ? 'currentColor' : 'none';
+  const sw = opts.strokeWidth || 1.75;
+  return `<svg class="ico" viewBox="0 0 24 24" width="${size}" height="${size}" fill="${fill}" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+}
+
 const GRID_START_MIN = 6 * 60;   // 6:00 AM
 const GRID_END_MIN = 23 * 60;    // 11:00 PM
 const PX_PER_MIN = 56 / 60;
@@ -48,124 +87,17 @@ function toast(msg) {
   toast._t = setTimeout(() => { el.hidden = true; }, 1800);
 }
 
-/* ======================= Seed data ======================= */
-function seedState() {
-  const today = todayStr();
-  const yest = dateStr(addDays(new Date(), -1));
-  const tmr = dateStr(addDays(new Date(), 1));
+/* ======================= Initial state =======================
+   A first run starts genuinely empty — no demo tasks, habits or records. The
+   app should look like the user's own from the first second, not something
+   they have to clean up first. */
+function blankState() {
   return {
-    tasks: [
-      { id: uid(), title: 'Morning pages', date: today, startMin: 7 * 60, durationMin: 30, done: true, createdAt: Date.now() - 90000 },
-      { id: uid(), title: 'Team standup', date: today, startMin: 9 * 60, durationMin: 15, done: false, createdAt: Date.now() - 80000 },
-      { id: uid(), title: 'Deep work: proposal draft', date: today, startMin: 9 * 60 + 30, durationMin: 90, done: false, createdAt: Date.now() - 70000 },
-      { id: uid(), title: 'Lunch + walk', date: today, startMin: 12 * 60 + 30, durationMin: 45, done: false, createdAt: Date.now() - 60000 },
-      { id: uid(), title: 'Call mom', date: today, startMin: null, durationMin: 20, done: false, createdAt: Date.now() - 50000 },
-      { id: uid(), title: 'Pick up dry cleaning', date: today, startMin: null, durationMin: 20, done: false, createdAt: Date.now() - 40000 },
-      { id: uid(), title: 'Review PR feedback', date: today, startMin: 15 * 60, durationMin: 45, done: false, createdAt: Date.now() - 30000 },
-      { id: uid(), title: 'Gym — legs day', date: today, startMin: 18 * 60, durationMin: 60, done: false, createdAt: Date.now() - 20000 },
-      { id: uid(), title: 'Book dentist appointment', date: null, startMin: null, durationMin: 20, done: false, createdAt: Date.now() - 15000 },
-      { id: uid(), title: 'Plan weekend trip', date: tmr, startMin: 10 * 60, durationMin: 60, done: false, createdAt: Date.now() - 10000 },
-      { id: uid(), title: 'Grocery run', date: tmr, startMin: 17 * 60, durationMin: 40, done: false, createdAt: Date.now() - 5000 },
-      { id: uid(), title: 'Read 20 pages', date: yest, startMin: 21 * 60, durationMin: 25, done: true, createdAt: Date.now() - 200000 },
-    ],
-    habits: seedHabits(),
-    routines: [
-      {
-        id: uid(), name: 'Morning', createdAt: Date.now() - 50000,
-        steps: [
-          { id: uid(), text: 'Drink a glass of water', seconds: 30 },
-          { id: uid(), text: 'Stretch', seconds: 90 },
-          { id: uid(), text: 'Make the bed', seconds: 60 },
-          { id: uid(), text: 'Review today’s plan', seconds: 60 },
-        ]
-      },
-      {
-        id: uid(), name: 'Before Bed', createdAt: Date.now() - 40000,
-        steps: [
-          { id: uid(), text: 'Lay out clothes for tomorrow', seconds: 60 },
-          { id: uid(), text: 'Brush teeth', seconds: 120 },
-          { id: uid(), text: 'Phone on charger, out of reach', seconds: 30 },
-          { id: uid(), text: 'Lights out', seconds: 15 },
-        ]
-      },
-      {
-        id: uid(), name: 'Going to the Gym', createdAt: Date.now() - 30000,
-        steps: [
-          { id: uid(), text: 'Pack gym bag', seconds: 90 },
-          { id: uid(), text: 'Fill water bottle', seconds: 30 },
-          { id: uid(), text: 'Grab headphones + keys', seconds: 20 },
-          { id: uid(), text: 'Head out', seconds: 15 },
-        ]
-      },
-    ],
-    chores: [
-      { id: uid(), name: 'Washing dishes', sessions: [612, 540, 585, 498, 570, 525], createdAt: Date.now() - 90000 },
-      { id: uid(), name: 'Folding laundry', sessions: [900, 780, 840], createdAt: Date.now() - 70000 },
-      { id: uid(), name: 'Tidying desk', sessions: [300, 360, 270, 330], createdAt: Date.now() - 60000 },
-    ],
-    lists: [
-      {
-        id: uid(), name: 'To Do List', attachedDate: today,
-        items: [
-          { id: uid(), text: 'Post office — mail package', done: false },
-          { id: uid(), text: 'Pharmacy pickup', done: true },
-          { id: uid(), text: 'Return Amazon package', done: false },
-        ]
-      },
-      {
-        id: uid(), name: 'Weekend Packing', attachedDate: null,
-        items: [
-          { id: uid(), text: 'Phone charger', done: false },
-          { id: uid(), text: 'Hiking boots', done: false },
-          { id: uid(), text: 'Rain jacket', done: false },
-          { id: uid(), text: 'Water bottle', done: false },
-        ]
-      },
-      {
-        id: uid(), name: 'Home Reset (Sunday)', attachedDate: null,
-        items: [
-          { id: uid(), text: 'Laundry', done: false },
-          { id: uid(), text: 'Clean kitchen surfaces', done: false },
-          { id: uid(), text: 'Meal prep', done: false },
-          { id: uid(), text: 'Water plants', done: false },
-        ]
-      },
-    ],
+    tasks: [], habits: [], routines: [], chores: [], lists: [],
+    alarmStacks: [], chatLog: [], aiMemory: { facts: [] },
     settings: { theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
-}
-
-function seedHabits() {
-  const habits = [
-    { id: uid(), name: 'Drink water', freq: { type: 'daily' }, completions: {}, sessions: [] },
-    { id: uid(), name: 'Read', freq: { type: 'daily' }, completions: {}, sessions: [] },
-    { id: uid(), name: 'Workout', freq: { type: 'weekly', count: 3 }, completions: {}, sessions: [] },
-    { id: uid(), name: 'Meditate', freq: { type: 'daily' }, completions: {}, sessions: [] },
-  ];
-  // backfill some plausible history over last 60 days
-  const now = new Date();
-  for (const h of habits) {
-    for (let i = 1; i <= 60; i++) {
-      const d = addDays(now, -i);
-      const ds = dateStr(d);
-      let chance = h.freq.type === 'daily' ? 0.78 : 0.42;
-      if (i <= 6) chance = h.freq.type === 'daily' ? 0.95 : 0.7; // recent streak looks good
-      if (Math.random() < chance) h.completions[ds] = true;
-    }
-  }
-  // seed practice sessions for the two habits that make sense to time
-  const readHabit = habits.find(h => h.name === 'Read');
-  const meditateHabit = habits.find(h => h.name === 'Meditate');
-  Object.keys(readHabit.completions).forEach(ds => {
-    if (Math.random() < 0.7) readHabit.sessions.push({ date: ds, seconds: 600 + Math.round(Math.random() * 900) });
-  });
-  Object.keys(meditateHabit.completions).forEach(ds => {
-    if (Math.random() < 0.8) meditateHabit.sessions.push({ date: ds, seconds: 300 + Math.round(Math.random() * 600) });
-  });
-  readHabit.sessions.sort((a, b) => a.date.localeCompare(b.date));
-  meditateHabit.sessions.sort((a, b) => a.date.localeCompare(b.date));
-  return habits;
 }
 
 /* ======================= State ======================= */
@@ -240,7 +172,7 @@ function renderColorSwatches(selectedId) {
       btn.style.background = s.hex;
       btn.dataset.scheme = s.id;
       btn.setAttribute('aria-label', s.name);
-      btn.innerHTML = `<span class="cs-check" style="color:${contrastTextFor(s.hex)}">✓</span>`;
+      btn.innerHTML = `<span class="cs-check" style="color:${contrastTextFor(s.hex)}">${icon('check', 16, {strokeWidth: 2.6})}</span>`;
       btn.addEventListener('click', () => {
         state.settings.colorScheme = s.id;
         saveState();
@@ -272,7 +204,7 @@ function updateInputBarMode() {
   const isChat = state.view.current === 'chat';
   const input = document.getElementById('quickAddInput');
   document.getElementById('quickAddModeBtn').hidden = isChat;
-  document.querySelector('.quick-add-btn').textContent = isChat ? '↑' : '＋';
+  document.querySelector('.quick-add-btn').innerHTML = icon(isChat ? 'arrowUp' : 'plus', 20, { strokeWidth: 2.1 });
   if (isChat) input.placeholder = 'Ask me anything…';
   else setQuickAddMode(quickAddMode);
 }
@@ -328,7 +260,7 @@ function renderToday() {
       list.items.forEach(item => {
         const row = document.createElement('div');
         row.className = 'checklist-today-list-item';
-        row.innerHTML = `<div class="checkbox ${item.done ? 'checked' : ''}">${item.done ? '✓' : ''}</div><div class="lbl ${item.done ? 'done' : ''}">${escapeHtml(item.text)}</div>`;
+        row.innerHTML = `<div class="checkbox ${item.done ? 'checked' : ''}">${icon('check', 15, {strokeWidth: 2.6})}</div><div class="lbl ${item.done ? 'done' : ''}">${escapeHtml(item.text)}</div>`;
         row.querySelector('.checkbox').addEventListener('click', (e) => {
           item.done = !item.done;
           e.currentTarget.classList.toggle('checked', item.done);
@@ -352,8 +284,8 @@ function renderInboxItem(t) {
   el.className = 'inbox-item';
   el.dataset.id = t.id;
   el.innerHTML = `
-    <div class="swipe-content"><span class="grip">⠿</span><span class="title">${escapeHtml(t.title)}</span><span class="place-hint">tap to place</span></div>
-    <button type="button" class="swipe-delete-btn" aria-label="Delete task">Delete</button>
+    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span><span class="place-hint">tap to place</span></div>
+    <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}<span>Delete</span></button>
   `;
   el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -509,7 +441,7 @@ function renderBlock(t) {
   el.style.height = height + 'px';
   el.innerHTML = `
     <div class="swipe-content"><div class="block-title">${escapeHtml(t.title)}</div><div class="block-time">${minToLabel(t.startMin)} · ${t.durationMin}m</div></div>
-    <button type="button" class="swipe-delete-btn" aria-label="Delete task">🗑</button>
+    <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}</button>
   `;
   el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -783,11 +715,11 @@ function setQuickAddMode(mode) {
   const btn = document.getElementById('quickAddModeBtn');
   const input = document.getElementById('quickAddInput');
   if (mode === 'habit') {
-    btn.textContent = '◍';
+    btn.innerHTML = icon('target', 20);
     btn.classList.add('habit-mode');
     input.placeholder = 'New daily habit…';
   } else {
-    btn.textContent = '✓';
+    btn.innerHTML = icon('check', 20);
     btn.classList.remove('habit-mode');
     input.placeholder = 'Add a task…';
   }
@@ -999,19 +931,19 @@ function renderHabits() {
     const avg = habitAvgSession(h);
     card.innerHTML = `
       <div class="habit-top">
-        <div class="habit-check ${done ? 'checked' : ''}">${done ? '✓' : ''}</div>
+        <div class="habit-check ${done ? 'checked' : ''}">${icon('check', 19, {strokeWidth: 2.4})}</div>
         <div class="habit-info">
           <div class="habit-name">${escapeHtml(h.name)}</div>
           <div class="habit-freq">${habitFreqLabel(h)}</div>
         </div>
-        <button type="button" class="habit-practice-btn" aria-label="Time a practice session">▶</button>
+        <button type="button" class="habit-practice-btn" aria-label="Time a practice session">${icon('play', 15, {fill:true, strokeWidth:0})}</button>
         <div class="habit-streak">
           <div class="n">${streak}</div>
           <div class="lbl">streak</div>
         </div>
       </div>
       <div class="heatmap" data-id="${h.id}"></div>
-      ${pr != null ? `<div class="habit-practice-meta">🏆 PR <span class="pr">${fmtMinSec(pr)}</span> · avg ${fmtMinSec(avg)} · total ${fmtMinSec(habitTotalPracticeSeconds(h))}</div>` : ''}
+      ${pr != null ? `<div class="habit-practice-meta">${icon('trophy', 13)} PR <span class="pr">${fmtMinSec(pr)}</span> · avg ${fmtMinSec(avg)} · total ${fmtMinSec(habitTotalPracticeSeconds(h))}</div>` : ''}
     `;
     const checkEl = card.querySelector('.habit-check');
     checkEl.addEventListener('click', () => {
@@ -1019,7 +951,7 @@ function renderHabits() {
       if (!h.completions[ds]) delete h.completions[ds];
       saveState();
       checkEl.classList.toggle('checked', !!h.completions[ds]);
-      checkEl.textContent = h.completions[ds] ? '✓' : '';
+      
       const nEl = card.querySelector('.n');
       nEl.textContent = computeStreak(h);
       nEl.classList.add('tick');
@@ -1237,7 +1169,7 @@ function renderListsSheet() {
     list.items.forEach(item => {
       const row = document.createElement('div');
       row.className = 'list-item-row';
-      row.innerHTML = `<div class="checkbox ${item.done ? 'checked' : ''}">${item.done ? '✓' : ''}</div><div class="lbl ${item.done ? 'done' : ''}">${escapeHtml(item.text)}</div>`;
+      row.innerHTML = `<div class="checkbox ${item.done ? 'checked' : ''}">${icon('check', 15, {strokeWidth: 2.6})}</div><div class="lbl ${item.done ? 'done' : ''}">${escapeHtml(item.text)}</div>`;
       row.querySelector('.checkbox').addEventListener('click', (e) => {
         item.done = !item.done;
         e.currentTarget.classList.toggle('checked', item.done);
@@ -1249,7 +1181,7 @@ function renderListsSheet() {
     card.appendChild(itemsWrap);
     const addRow = document.createElement('div');
     addRow.className = 'list-add-row';
-    addRow.innerHTML = `<input type="text" placeholder="Add item…" maxlength="80"><button type="button">＋</button>`;
+    addRow.innerHTML = `<input type="text" placeholder="Add item…" maxlength="80"><button type="button">${icon('plus', 17, {strokeWidth:2})}</button>`;
     const input = addRow.querySelector('input');
     const doAdd = () => {
       const v = input.value.trim();
@@ -1306,7 +1238,7 @@ function renderRoutinesSheet() {
   alarmCard.innerHTML = `
     <div class="routine-card-head">
       <div>
-        <div class="rname">⏰ Triple Alarm</div>
+        <div class="rname">${icon('alarm', 17)}<span>Triple Alarm</span></div>
         <div class="routine-card-meta">${stackCount ? `${stackCount} stack${stackCount === 1 ? '' : 's'} saved` : 'One time → three alarms, 2 min apart'}</div>
       </div>
     </div>
@@ -1331,7 +1263,7 @@ function renderRoutinesSheet() {
         </div>
       </div>
       <div class="routine-card-actions">
-        <button class="pill-btn accent" data-act="start">▶ Start</button>
+        <button class="pill-btn accent" data-act="start">${icon('play', 16, {fill:true, strokeWidth:0})}<span>Start</span></button>
         <button class="pill-btn" data-act="edit">Edit</button>
       </div>
     `;
@@ -1451,7 +1383,7 @@ function renderWorkingSteps() {
   workingSteps.forEach((s, i) => {
     const row = document.createElement('div');
     row.className = 'routine-step-row';
-    row.innerHTML = `<span class="rs-idx">${i + 1}</span><span class="rs-text">${escapeHtml(s.text)}</span><span class="rs-dur">${fmtMinSec(s.seconds)}</span><button type="button" class="rs-del" aria-label="Remove">✕</button>`;
+    row.innerHTML = `<span class="rs-idx">${i + 1}</span><span class="rs-text">${escapeHtml(s.text)}</span><span class="rs-dur">${fmtMinSec(s.seconds)}</span><button type="button" class="rs-del" aria-label="Remove">${icon('x', 15)}</button>`;
     row.querySelector('.rs-del').addEventListener('click', () => {
       workingSteps.splice(i, 1);
       renderWorkingSteps();
@@ -1620,8 +1552,8 @@ function renderChoresSheet() {
         <div class="chore-meta">${avg != null ? `avg <span class="avg">${fmtMinSec(avg)}</span> · last ${fmtMinSec(last)} · ${c.sessions.length} run${c.sessions.length === 1 ? '' : 's'}` : 'not timed yet'}</div>
       </div>
       <div class="chore-actions">
-        <button class="chore-start-btn" data-act="start">▶ Start</button>
-        <button class="chore-del-btn" data-act="del" aria-label="Delete">✕</button>
+        <button class="chore-start-btn" data-act="start">${icon('play', 14, {fill:true, strokeWidth:0})}<span>Start</span></button>
+        <button class="chore-del-btn" data-act="del" aria-label="Delete">${icon('x', 16)}</button>
       </div>
     `;
     card.querySelector('[data-act="start"]').addEventListener('click', () => {
@@ -1832,8 +1764,8 @@ function renderAlarmStackList() {
         <div class="alarm-stack-time">${minToLabel(stack.startMin)}</div>
         <div class="alarm-stack-meta">${escapeHtml(stack.label || 'DayFlow Alarm')} · +${ALARM_GAP_MIN}m · +${ALARM_GAP_MIN * 2}m</div>
       </div>
-      <button class="asc-btn dl" data-act="dl" aria-label="Re-download">⤓</button>
-      <button class="asc-btn" data-act="del" aria-label="Delete">✕</button>
+      <button class="asc-btn dl" data-act="dl" aria-label="Re-download">${icon('download', 18)}</button>
+      <button class="asc-btn" data-act="del" aria-label="Delete">${icon('x', 17)}</button>
     `;
     card.querySelector('[data-act="dl"]').addEventListener('click', () => {
       downloadAlarmIcs(stack);
@@ -1896,9 +1828,9 @@ function stopHabitTimer(save) {
     saveState();
 
     if (prevPR == null) {
-      toast(`🏆 First session logged: ${fmtMinSec(elapsed)} — that's your new record`);
+      toast(`First session logged: ${fmtMinSec(elapsed)} — that's your new record`);
     } else if (elapsed > prevPR) {
-      toast(`🏆 New personal best! ${fmtMinSec(elapsed)} (previous: ${fmtMinSec(prevPR)})`);
+      toast(`New personal best! ${fmtMinSec(elapsed)} (previous: ${fmtMinSec(prevPR)})`);
     } else {
       toast(`Logged ${fmtMinSec(elapsed)} — PR is still ${fmtMinSec(prevPR)}` + (wasAlreadyDone ? '' : ` · “${h.name}” checked off for today`));
     }
@@ -1915,41 +1847,75 @@ document.getElementById('habitRunCloseBtn').addEventListener('click', () => stop
    Uses the Web Speech API, which Safari supports on iOS 14.5+. Recognition
    itself is handled by the OS/Apple, not by DayFlow. Where it's unavailable
    (some standalone-PWA builds), we say so plainly and point at the keyboard's
-   own mic key, which always works. */
+   own mic key, which always works.
+
+   The mic is a hard toggle. The button's lit state is driven by the engine's
+   own onstart/onend events rather than an optimistic flag, because start()
+   can reject and end can fire on its own — an optimistic flag desyncs from
+   reality and leaves the button stuck on with no way to switch it off. */
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null, isListening = false, dictationBase = '';
+let recognition = null;
+let isListening = false;
+let dictationBase = '';
+let stoppedByUser = false;
+let listenTimeout = null;
+
+const MAX_LISTEN_MS = 60000;
 
 function voiceSupported() { return !!SpeechRec; }
+
+function setMicUI(on) {
+  isListening = on;
+  const btn = document.getElementById('micBtn');
+  btn.classList.toggle('listening', on);
+  btn.setAttribute('aria-label', on ? 'Stop dictation' : 'Dictate');
+  btn.innerHTML = icon(on ? 'stop' : 'mic', on ? 17 : 19, on ? { fill: true, strokeWidth: 0 } : {});
+  clearTimeout(listenTimeout);
+  if (on) listenTimeout = setTimeout(() => stopListening(true), MAX_LISTEN_MS);
+}
 
 function initRecognition() {
   if (!voiceSupported() || recognition) return recognition;
   recognition = new SpeechRec();
-  recognition.continuous = false;
+  recognition.continuous = true;      // don't cut out on a natural pause
   recognition.interimResults = true;
   recognition.lang = navigator.language || 'en-US';
 
+  recognition.onstart = () => setMicUI(true);
+
   recognition.onresult = (event) => {
     let transcript = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
+    for (let i = 0; i < event.results.length; i++) {
       transcript += event.results[i][0].transcript;
     }
     const input = document.getElementById('quickAddInput');
-    input.value = (dictationBase ? dictationBase + ' ' : '') + transcript;
+    input.value = (dictationBase ? dictationBase + ' ' : '') + transcript.trim();
   };
 
   recognition.onerror = (e) => {
-    stopListening();
+    setMicUI(false);
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       toast('Mic blocked — allow it in Settings › Safari');
-    } else if (e.error !== 'aborted' && e.error !== 'no-speech') {
-      toast('Dictation error: ' + e.error);
     } else if (e.error === 'no-speech') {
       toast("Didn't catch anything");
+    } else if (e.error !== 'aborted') {
+      toast('Dictation error: ' + e.error);
     }
   };
 
+  // Fires on manual stop, natural end, and error alike — the single source of
+  // truth for switching the button back off.
   recognition.onend = () => {
-    if (isListening) stopListening();
+    setMicUI(false);
+    // Only auto-send when speech ended on its own. If the user tapped to stop,
+    // leave the text alone so they can edit it.
+    if (!stoppedByUser) {
+      const input = document.getElementById('quickAddInput');
+      if (input.value.trim()) {
+        document.getElementById('quickAddForm').requestSubmit();
+      }
+    }
+    stoppedByUser = false;
   };
 
   return recognition;
@@ -1958,40 +1924,41 @@ function initRecognition() {
 function startListening() {
   const rec = initRecognition();
   if (!rec) {
-    toast('Use the 🎤 on your keyboard instead');
+    toast('Use the mic key on your keyboard instead');
     document.getElementById('quickAddInput').focus();
     return;
   }
+  stoppedByUser = false;
   dictationBase = document.getElementById('quickAddInput').value.trim();
   try {
     rec.start();
-    isListening = true;
-    document.getElementById('micBtn').classList.add('listening');
-    toast('Listening…');
   } catch (err) {
-    // start() throws if already running; reset and ignore.
-    isListening = false;
-    document.getElementById('micBtn').classList.remove('listening');
+    // Already running from a session that never cleanly ended: force it down
+    // and retry once, so the button never gets wedged.
+    try { rec.abort(); } catch (e) { /* nothing to abort */ }
+    setMicUI(false);
+    setTimeout(() => { try { rec.start(); } catch (e2) { toast('Mic unavailable — try again'); } }, 200);
   }
 }
 
-function stopListening() {
-  isListening = false;
-  document.getElementById('micBtn').classList.remove('listening');
-  if (recognition) { try { recognition.stop(); } catch (e) { /* already stopped */ } }
+function stopListening(auto) {
+  stoppedByUser = !auto;
+  setMicUI(false);
+  if (recognition) {
+    try { recognition.stop(); } catch (e) {
+      try { recognition.abort(); } catch (e2) { /* already down */ }
+    }
+  }
 }
 
 document.getElementById('micBtn').addEventListener('click', () => {
-  if (isListening) {
-    stopListening();
-    // Auto-submit whatever was captured, so speaking a task files it in one go.
-    const input = document.getElementById('quickAddInput');
-    if (input.value.trim()) {
-      setTimeout(() => document.getElementById('quickAddForm').requestSubmit(), 120);
-    }
-  } else {
-    startListening();
-  }
+  if (isListening) stopListening(false);
+  else startListening();
+});
+
+// Leaving the app or switching tabs should never leave the mic hot.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && isListening) stopListening(true);
 });
 
 /* ======================= Local assistant =======================
@@ -2319,7 +2286,7 @@ function streakReport() {
     .map(h => ({ h, cur: computeStreak(h), best: computeLongestStreak(h) }))
     .sort((a, b) => b.cur - a.cur)
     .forEach(({ h, cur, best }) => {
-      const flame = cur >= 7 ? ' 🔥' : '';
+      const flame = cur >= 7 ? ' ●' : '';
       out += `${h.name} — now {{${cur}}}, best {{${best}}}${flame}\n`;
     });
   const atRisk = state.habits.filter(h => computeStreak(h) > 2 && !habitDoneOn(h, todayStr()));
@@ -2331,7 +2298,7 @@ function recordsReport() {
   const timed = state.habits.filter(h => h.sessions && h.sessions.length);
   const chores = state.chores.filter(c => c.sessions.length);
   if (!timed.length && !chores.length) {
-    return `No timed records yet. Hit ▶ on any habit to time a practice session, or use the chore timer — after that I can tell you your averages and personal bests.`;
+    return `No timed records yet. Hit the play button on any habit to time a practice session, or use the chore timer — after that I can tell you your averages and personal bests.`;
   }
   let out = `**Records**\n`;
   if (timed.length) {
@@ -2574,13 +2541,12 @@ document.getElementById('importFile').addEventListener('change', (e) => {
 });
 
 function emptyState() {
-  return {
-    tasks: [], habits: [], routines: [], chores: [], lists: [],
-    alarmStacks: [], chatLog: [], aiMemory: { facts: [] },
-    settings: { ...state.settings },
-    view: { current: state.view.current, todayOffset: 0, weekOffset: 0 },
-  };
+  const s = blankState();
+  s.settings = { ...state.settings };
+  s.view = { current: state.view.current, todayOffset: 0, weekOffset: 0 };
+  return s;
 }
+
 
 document.getElementById('clearPracticeBtn').addEventListener('click', () => {
   const sessionCount = state.habits.reduce((a, h) => a + (h.sessions || []).length, 0)
@@ -2610,8 +2576,7 @@ document.getElementById('clearSampleBtn').addEventListener('click', () => {
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   if (!confirm('Erase everything, including settings? This cannot be undone.')) return;
-  state = emptyState();
-  state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false };
+  state = blankState();
   saveState();
   applyTheme();
   closeSheets();

@@ -20,12 +20,12 @@
 
   <!-- ===== Header ===== -->
   <header class="topbar">
-    <button id="listsBtn" class="icon-btn" aria-label="Lists">☰</button>
+    <button id="listsBtn" class="icon-btn" aria-label="Lists"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg></button>
     <h1 id="viewTitle">Today</h1>
     <div class="topbar-right">
-      <button id="routinesBtn" class="icon-btn" aria-label="Routines">⏱</button>
-      <button id="choresBtn" class="icon-btn" aria-label="Chore timer">⏳</button>
-      <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙</button>
+      <button id="routinesBtn" class="icon-btn" aria-label="Routines"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2.5 3.5 3.5L17 9.5"/><path d="M3.5 11.5v-1a4 4 0 0 1 4-4h13"/><path d="m7 21.5-3.5-3.5L7 14.5"/><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13"/></svg></button>
+      <button id="choresBtn" class="icon-btn" aria-label="Chore timer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h5"/><path d="M12 14v-4"/><circle cx="12" cy="14" r="7.75"/></svg></button>
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M1.5 15h5M9.5 8h5M17.5 17h5"/></svg></button>
     </div>
   </header>
 
@@ -35,9 +35,9 @@
     <!-- TODAY -->
     <section id="view-today" class="view active">
       <div class="day-nav">
-        <button id="todayPrev" class="chevron">‹</button>
+        <button id="todayPrev" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 18.5-6.5-6.5 6.5-6.5"/></svg></button>
         <div id="todayDateLabel" class="day-nav-label"></div>
-        <button id="todayNext" class="chevron">›</button>
+        <button id="todayNext" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
       </div>
 
       <div id="inboxSection" class="inbox-section">
@@ -53,7 +53,7 @@
       <button type="button" id="scheduleToggle" class="schedule-toggle">
         <span class="st-label">Schedule</span>
         <span class="st-summary" id="scheduleSummary"></span>
-        <span class="st-chev" id="scheduleChev">▾</span>
+        <span class="st-chev" id="scheduleChev"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5.5 9 6.5 6.5L18.5 9"/></svg></span>
       </button>
 
       <div class="grid-scroll" id="gridScroll" hidden>
@@ -68,9 +68,9 @@
     <!-- WEEK -->
     <section id="view-week" class="view">
       <div class="day-nav">
-        <button id="weekPrev" class="chevron">‹</button>
+        <button id="weekPrev" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 18.5-6.5-6.5 6.5-6.5"/></svg></button>
         <div id="weekRangeLabel" class="day-nav-label"></div>
-        <button id="weekNext" class="chevron">›</button>
+        <button id="weekNext" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
       </div>
       <div class="week-grid" id="weekGrid"></div>
     </section>
@@ -112,19 +112,19 @@
 
   <!-- ===== Quick Add (always visible) ===== -->
   <form id="quickAddForm" class="quick-add">
-    <button type="button" id="quickAddModeBtn" class="quick-add-mode" aria-label="Switch between task and habit">✓</button>
-    <button type="button" id="micBtn" class="quick-add-mic" aria-label="Dictate">🎤</button>
+    <button type="button" id="quickAddModeBtn" class="quick-add-mode" aria-label="Switch between task and habit"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6.5 9.2 17.3 4 12.1"/></svg></button>
+    <button type="button" id="micBtn" class="quick-add-mic" aria-label="Dictate"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10.5v1.5a7 7 0 0 1-14 0v-1.5"/><path d="M12 19v3"/></svg></button>
     <input id="quickAddInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="400">
-    <button type="submit" class="quick-add-btn" aria-label="Add">＋</button>
+    <button type="submit" class="quick-add-btn" aria-label="Add"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   </form>
 
   <!-- ===== Bottom Tab Bar ===== -->
   <nav class="tabbar">
-    <button class="tab active" data-view="today"><span class="tab-icon">☀</span><span>Today</span></button>
-    <button class="tab" data-view="week"><span class="tab-icon">▦</span><span>Week</span></button>
-    <button class="tab" data-view="habits"><span class="tab-icon">◍</span><span>Habits</span></button>
-    <button class="tab" data-view="chat"><span class="tab-icon">✦</span><span>Chat</span></button>
-    <button class="tab" data-view="stats"><span class="tab-icon">▲</span><span>Stats</span></button>
+    <button class="tab active" data-view="today"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg></span><span>Today</span></button>
+    <button class="tab" data-view="week"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/></svg></span><span>Week</span></button>
+    <button class="tab" data-view="habits"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9.5"/></svg></span><span>Habits</span></button>
+    <button class="tab" data-view="chat"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l1.7 4.8 4.8 1.7-4.8 1.7L12 16.2l-1.7-4.8L5.5 9.7l4.8-1.7L12 3.2Z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg></span><span>Assistant</span></button>
+    <button class="tab" data-view="stats"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M6.5 21v-6M12 21V6M17.5 21v-9"/></svg></span><span>Stats</span></button>
   </nav>
 
 </div>
@@ -143,9 +143,9 @@
     <div class="sheet-row">
       <label>Duration</label>
       <div class="stepper">
-        <button type="button" id="durMinus" class="stepper-btn">−</button>
+        <button type="button" id="durMinus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
         <span id="durLabel">30 min</span>
-        <button type="button" id="durPlus" class="stepper-btn">+</button>
+        <button type="button" id="durPlus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       </div>
     </div>
     <div class="sheet-actions">
@@ -171,9 +171,9 @@
     <div class="sheet-row" id="freqCountRow" hidden>
       <label>Times / week</label>
       <div class="stepper">
-        <button type="button" id="freqMinus" class="stepper-btn">−</button>
+        <button type="button" id="freqMinus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
         <span id="freqCountLabel">3</span>
-        <button type="button" id="freqPlus" class="stepper-btn">+</button>
+        <button type="button" id="freqPlus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       </div>
     </div>
     <div class="sheet-actions">
@@ -214,7 +214,7 @@
       <label>Remind me at</label>
       <div class="reminder-time-row">
         <input id="routineRemindInput" type="time" step="900">
-        <button type="button" id="routineRemindClearBtn" class="reminder-clear-btn" aria-label="Clear reminder">✕</button>
+        <button type="button" id="routineRemindClearBtn" class="reminder-clear-btn" aria-label="Clear reminder"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
     </div>
     <div class="section-label" style="padding-left:0">Steps</div>
@@ -247,7 +247,7 @@
       <div class="wheel-col" id="alarmApCol"></div>
     </div>
     <div class="alarm-preview" id="alarmPreview"></div>
-    <button id="alarmCreateBtn" class="primary-btn">⏰ Create 3 alarms</button>
+    <button id="alarmCreateBtn" class="primary-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="m4.5 3-2.2 2.2M19.5 3l2.2 2.2"/></svg><span>Create 3 alarms</span></button>
     <div class="section-label" style="padding-left:0;margin-top:16px;">Saved stacks</div>
     <div id="alarmStackList"></div>
   </div>
@@ -270,7 +270,7 @@
 
 <div id="routineRunOverlay" class="routine-run-overlay" hidden>
   <div class="run-top">
-    <button id="runCloseBtn" class="icon-btn" aria-label="Close">✕</button>
+    <button id="runCloseBtn" class="icon-btn" aria-label="Close"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     <div class="run-progress" id="runProgress">Step 1 of 1</div>
     <div class="run-spacer"></div>
   </div>
@@ -285,13 +285,13 @@
       <div class="run-timer-num" id="runTimerNum">60</div>
     </div>
     <div class="run-controls">
-      <button id="runPrevBtn" class="pill-btn">‹ Prev</button>
+      <button id="runPrevBtn" class="pill-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 18.5-6.5-6.5 6.5-6.5"/></svg><span>Prev</span></button>
       <button id="runPauseBtn" class="pill-btn accent">Pause</button>
-      <button id="runNextBtn" class="pill-btn">Skip ›</button>
+      <button id="runNextBtn" class="pill-btn"><span>Skip</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
     </div>
   </div>
   <div class="run-done" id="runDone" hidden>
-    <div class="run-done-check">✓</div>
+    <div class="run-done-check"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6.5 9.2 17.3 4 12.1"/></svg></div>
     <div class="run-done-title">Routine complete</div>
     <div class="run-done-time" id="runDoneTime"></div>
     <button id="runFinishBtn" class="primary-btn">Done</button>
@@ -308,14 +308,14 @@
     <div id="choresContainer"></div>
     <div class="list-add-row" style="margin-top:4px;">
       <input type="text" id="newChoreInput" placeholder="Add a chore (e.g. Washing dishes)…" maxlength="60">
-      <button type="button" id="addChoreBtn">＋</button>
+      <button type="button" id="addChoreBtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
     </div>
   </div>
 </div>
 
 <div id="choreRunOverlay" class="chore-run-overlay" hidden>
   <div class="run-top">
-    <button id="choreCloseBtn" class="icon-btn" aria-label="Cancel">✕</button>
+    <button id="choreCloseBtn" class="icon-btn" aria-label="Cancel"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     <div class="run-progress" id="choreRunName">Chore</div>
     <div class="run-spacer"></div>
   </div>
@@ -326,14 +326,14 @@
     </div>
     <div class="run-controls">
       <button id="choreCancelBtn" class="pill-btn">Cancel</button>
-      <button id="choreDoneBtn" class="pill-btn accent">✓ Done</button>
+      <button id="choreDoneBtn" class="pill-btn accent"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6.5 9.2 17.3 4 12.1"/></svg><span>Done</span></button>
     </div>
   </div>
 </div>
 
 <div id="habitRunOverlay" class="chore-run-overlay" hidden>
   <div class="run-top">
-    <button id="habitRunCloseBtn" class="icon-btn" aria-label="Cancel">✕</button>
+    <button id="habitRunCloseBtn" class="icon-btn" aria-label="Cancel"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     <div class="run-progress" id="habitRunName">Habit</div>
     <div class="run-spacer"></div>
   </div>
@@ -344,7 +344,7 @@
     </div>
     <div class="run-controls">
       <button id="habitCancelBtn" class="pill-btn">Cancel</button>
-      <button id="habitDoneRunBtn" class="pill-btn accent">✓ Done</button>
+      <button id="habitDoneRunBtn" class="pill-btn accent"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6.5 9.2 17.3 4 12.1"/></svg><span>Done</span></button>
     </div>
   </div>
 </div>

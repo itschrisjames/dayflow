@@ -725,3 +725,39 @@ button { font-family: inherit; }
   font-size: 52px; font-weight: 800; font-variant-numeric: tabular-nums;
   color: var(--text);
 }
+
+/* ---------- Inline SVG icons ---------- */
+.ico { display: block; flex-shrink: 0; }
+.icon-btn .ico { width: 21px; height: 21px; }
+.chevron .ico { width: 20px; height: 20px; margin: 0 auto; }
+.tab-icon .ico { width: 22px; height: 22px; }
+.tab-icon { display: flex; align-items: center; justify-content: center; height: 22px; }
+.st-chev .ico { width: 16px; height: 16px; }
+.stepper-btn .ico { width: 16px; height: 16px; margin: 0 auto; }
+.quick-add-mode .ico, .quick-add-mic .ico, .quick-add-btn .ico { margin: 0 auto; }
+.quick-add-mode .ico { width: 20px; height: 20px; }
+.quick-add-mic .ico { width: 19px; height: 19px; }
+.quick-add-btn .ico { width: 20px; height: 20px; }
+.grip .ico { width: 16px; height: 16px; }
+.rs-del .ico, .chore-del-btn .ico, .asc-btn .ico { margin: 0 auto; }
+.reminder-clear-btn .ico { width: 15px; height: 15px; margin: 0 auto; }
+
+/* Buttons that pair an icon with a label */
+.pill-btn, .primary-btn, .chore-start-btn, .swipe-delete-btn {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+}
+.pill-btn .ico { width: 16px; height: 16px; }
+.primary-btn .ico { width: 18px; height: 18px; }
+.chore-start-btn .ico { width: 13px; height: 13px; }
+.swipe-delete-btn .ico { width: 17px; height: 17px; }
+.block .swipe-delete-btn { gap: 0; }
+.rname { display: flex; align-items: center; gap: 7px; }
+.habit-practice-meta .ico { width: 13px; height: 13px; }
+
+/* Checkboxes reveal their tick rather than recolouring transparent text */
+.checkbox .ico, .habit-check .ico, .cs-check .ico { opacity: 0; transition: opacity .12s ease; }
+.checkbox.checked .ico, .habit-check.checked .ico, .color-swatch.selected .cs-check .ico { opacity: 1; }
+.checkbox, .habit-check { color: var(--accent-text); }
+.habit-practice-btn { display: flex; align-items: center; justify-content: center; }
+.habit-practice-btn .ico { margin-left: 1px; }
+.run-done-check .ico { width: 40px; height: 40px; }
