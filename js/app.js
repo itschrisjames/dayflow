@@ -15,7 +15,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v10';
+const APP_VERSION = 'v11';
 const APP_BUILT = '2026-08-14';
 
 /* ======================= Storage ======================= */
@@ -183,6 +183,9 @@ function ensureHabitSessions(s) {
     // Habits can now be checked off several times a day. Older data stored a
     // plain boolean per day; treat that as a single completion.
     if (!h.dailyTarget || h.dailyTarget < 1) h.dailyTarget = 1;
+    // Only some habits are worth timing. Anything with existing records keeps
+    // its timer; everything else starts without one.
+    if (h.timed === undefined) h.timed = (h.sessions && h.sessions.length > 0);
     const c = h.completions || (h.completions = {});
     Object.keys(c).forEach(k => {
       if (c[k] === true) c[k] = 1;
@@ -875,7 +878,7 @@ on('quickAddForm', 'submit', (e) => {
   }
 
   if (quickAddMode === 'habit') {
-    state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {}, sessions: [], dailyTarget: 1 });
+    state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {}, sessions: [], dailyTarget: 1, timed: false });
     saveState();
     input.value = '';
     setQuickAddMode('task');
@@ -1099,14 +1102,14 @@ function renderHabits() {
           <div class="habit-name">${escapeHtml(h.name)}</div>
           <div class="habit-freq">${habitFreqLabel(h)}</div>
         </div>
-        <button type="button" class="habit-practice-btn" aria-label="Time a practice session">${icon('play', 15, {fill:true, strokeWidth:0})}</button>
+        ${h.timed ? `<button type="button" class="habit-practice-btn" aria-label="Time a practice session">${icon('play', 15, {fill:true, strokeWidth:0})}</button>` : ''}
         <div class="habit-streak">
           <div class="n">${streak}</div>
           <div class="lbl">streak</div>
         </div>
       </div>
       <div class="heatmap" data-id="${h.id}"></div>
-      ${pr != null ? `<div class="habit-practice-meta">${icon('trophy', 13)} PR <span class="pr">${fmtMinSec(pr)}</span> · avg ${fmtMinSec(avg)} · total ${fmtMinSec(habitTotalPracticeSeconds(h))}</div>` : ''}
+      ${h.timed && pr != null ? `<div class="habit-practice-meta">${icon('trophy', 13)} PR <span class="pr">${fmtMinSec(pr)}</span> · avg ${fmtMinSec(avg)} · total ${fmtMinSec(habitTotalPracticeSeconds(h))}</div>` : ''}
     `;
     const checkEl = card.querySelector('.habit-check');
     const refresh = () => {
@@ -1150,7 +1153,8 @@ function renderHabits() {
       else if (target > 1 && now > 0) toast(`${now}/${target} today`);
     });
     card.querySelector('.habit-name').addEventListener('click', () => openHabitSheet(h));
-    card.querySelector('.habit-practice-btn').addEventListener('click', () => startHabitTimer(h));
+    const practiceBtn = card.querySelector('.habit-practice-btn');
+    if (practiceBtn) practiceBtn.addEventListener('click', () => startHabitTimer(h));
     list.appendChild(card);
     renderHeatmap(card.querySelector('.heatmap'), h);
   });
@@ -1233,6 +1237,7 @@ let activeHabit = null;
 let habitFreqType = 'daily';
 let habitFreqCount = 3;
 let habitDailyTarget = 1;
+let habitTimed = false;
 
 function openHabitSheet(h) {
   activeHabit = h;
@@ -1240,6 +1245,7 @@ function openHabitSheet(h) {
   habitFreqType = h ? h.freq.type : 'daily';
   habitFreqCount = h && h.freq.type === 'weekly' ? h.freq.count : 3;
   habitDailyTarget = h ? habitTarget(h) : 1;
+  habitTimed = h ? !!h.timed : false;
   updateFreqUI();
   document.getElementById('habitDeleteBtn').hidden = !h;
   const clearBtn = document.getElementById('habitClearRecordsBtn');
@@ -1257,7 +1263,14 @@ function updateFreqUI() {
   if (fc) fc.textContent = habitFreqCount;
   const tl = document.getElementById('targetLabel');
   if (tl) tl.textContent = habitDailyTarget;
+  const tt = document.getElementById('habitTimerToggle');
+  if (tt) {
+    tt.textContent = habitTimed ? 'On' : 'Off';
+    tt.classList.toggle('active', habitTimed);
+  }
 }
+
+on('habitTimerToggle', 'click', () => { habitTimed = !habitTimed; updateFreqUI(); });
 
 on('targetMinus', 'click', () => { habitDailyTarget = Math.max(1, habitDailyTarget - 1); updateFreqUI(); });
 on('targetPlus',  'click', () => { habitDailyTarget = Math.min(30, habitDailyTarget + 1); updateFreqUI(); });
@@ -1276,8 +1289,9 @@ on('habitSaveBtn', 'click', () => {
     activeHabit.name = name;
     activeHabit.freq = freq;
     activeHabit.dailyTarget = habitDailyTarget;
+    activeHabit.timed = habitTimed;
   } else {
-    state.habits.push({ id: uid(), name, freq, completions: {}, sessions: [], dailyTarget: habitDailyTarget });
+    state.habits.push({ id: uid(), name, freq, completions: {}, sessions: [], dailyTarget: habitDailyTarget, timed: habitTimed });
   }
   saveState();
   closeSheets();
@@ -2421,7 +2435,7 @@ function assistantRespond(raw) {
   m = q.match(/^(?:add|new|create|track)\s+(?:a\s+)?habit\s+(?:called\s+)?(.+)$/);
   if (m) {
     const name = raw.trim().replace(/^(?:add|new|create|track)\s+(?:a\s+)?habit\s+(?:called\s+)?/i, '').trim();
-    state.habits.push({ id: uid(), name, freq: { type: 'daily' }, completions: {}, sessions: [], dailyTarget: 1 });
+    state.habits.push({ id: uid(), name, freq: { type: 'daily' }, completions: {}, sessions: [], dailyTarget: 1, timed: false });
     saveState(); renderAll();
     return `Tracking **${name}** as a daily habit from today. You can change it to an x-per-week habit by tapping its name on the Habits tab.`;
   }
@@ -2635,7 +2649,7 @@ function recordsReport() {
   const timed = state.habits.filter(h => h.sessions && h.sessions.length);
   const chores = state.chores.filter(c => c.sessions.length);
   if (!timed.length && !chores.length) {
-    return `No timed records yet. Hit the play button on any habit to time a practice session, or use the chore timer — after that I can tell you your averages and personal bests.`;
+    return `No timed records yet. Open a habit and switch its **practice timer** on (good for guitar, reading, meditation), then hit play to time a session. The chore timer works the same way.`;
   }
   let out = `**Records**\n`;
   if (timed.length) {
