@@ -1,6 +1,23 @@
 (() => {
 'use strict';
 
+/* ======================= Safe DOM binding =======================
+   A single `document.getElementById(x).addEventListener(...)` against a
+   missing element throws, and every listener registered after it silently
+   never binds — which looks to the user like "half the app stopped working".
+   Bind through this instead so a markup/script mismatch degrades gracefully. */
+function on(id, evt, fn, opts) {
+  const el = document.getElementById(id);
+  if (!el) { console.warn('[DayFlow] missing element:', id); return null; }
+  el.addEventListener(evt, fn, opts);
+  return el;
+}
+
+/* ======================= Build info ======================= */
+// Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
+const APP_VERSION = 'v7';
+const APP_BUILT = '2026-08-14';
+
 /* ======================= Storage ======================= */
 const STORE_KEY = 'dayflow.v1';
 const THEME_KEY = 'dayflow.theme';
@@ -216,7 +233,8 @@ function updateInputBarMode() {
   const isChat = state.view.current === 'chat';
   const input = document.getElementById('quickAddInput');
   document.getElementById('quickAddModeBtn').hidden = isChat;
-  document.querySelector('.quick-add-btn').innerHTML = icon(isChat ? 'arrowUp' : 'plus', 20, { strokeWidth: 2.1 });
+  const sendBtn = document.querySelector('.quick-add-btn');
+  if (sendBtn) sendBtn.innerHTML = icon(isChat ? 'arrowUp' : 'plus', 20, { strokeWidth: 2.1 });
   if (isChat) input.placeholder = 'Ask me anything…';
   else setQuickAddMode(quickAddMode);
 }
@@ -343,7 +361,7 @@ function renderScheduleToggle(ds) {
   }
 }
 
-document.getElementById('scheduleToggle').addEventListener('click', () => {
+on('scheduleToggle', 'click', () => {
   state.settings.showSchedule = !state.settings.showSchedule;
   saveState();
   renderToday();
@@ -717,10 +735,10 @@ function paintUrgencyOptions() {
 }
 function updateDurLabel() { document.getElementById('durLabel').textContent = currentDuration + ' min'; }
 
-document.getElementById('durMinus').addEventListener('click', () => { currentDuration = Math.max(5, currentDuration - 5); updateDurLabel(); });
-document.getElementById('durPlus').addEventListener('click', () => { currentDuration = Math.min(480, currentDuration + 5); updateDurLabel(); });
+on('durMinus', 'click', () => { currentDuration = Math.max(5, currentDuration - 5); updateDurLabel(); });
+on('durPlus', 'click', () => { currentDuration = Math.min(480, currentDuration + 5); updateDurLabel(); });
 
-document.getElementById('blockSaveBtn').addEventListener('click', () => {
+on('blockSaveBtn', 'click', () => {
   if (!activeBlock) return;
   const title = document.getElementById('blockTitleInput').value.trim();
   if (title) activeBlock.title = title;
@@ -738,7 +756,7 @@ document.getElementById('blockSaveBtn').addEventListener('click', () => {
   renderAll();
 });
 
-document.getElementById('blockDoneBtn').addEventListener('click', () => {
+on('blockDoneBtn', 'click', () => {
   if (!activeBlock) return;
   activeBlock.done = !activeBlock.done;
   saveState();
@@ -746,7 +764,7 @@ document.getElementById('blockDoneBtn').addEventListener('click', () => {
   renderAll();
 });
 
-document.getElementById('blockUnscheduleBtn').addEventListener('click', () => {
+on('blockUnscheduleBtn', 'click', () => {
   if (!activeBlock) return;
   activeBlock.startMin = null;
   saveState();
@@ -754,7 +772,7 @@ document.getElementById('blockUnscheduleBtn').addEventListener('click', () => {
   renderAll();
 });
 
-document.getElementById('blockDeleteBtn').addEventListener('click', () => {
+on('blockDeleteBtn', 'click', () => {
   if (!activeBlock) return;
   state.tasks = state.tasks.filter(x => x.id !== activeBlock.id);
   saveState();
@@ -780,11 +798,11 @@ function setQuickAddMode(mode) {
   }
 }
 
-document.getElementById('quickAddModeBtn').addEventListener('click', () => {
+on('quickAddModeBtn', 'click', () => {
   setQuickAddMode(quickAddMode === 'task' ? 'habit' : 'task');
 });
 
-document.getElementById('quickAddForm').addEventListener('submit', (e) => {
+on('quickAddForm', 'submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('quickAddInput');
   const title = input.value.trim();
@@ -897,10 +915,10 @@ function makeWeekBlockDraggable(el, t) {
   });
 }
 
-document.getElementById('todayPrev').addEventListener('click', () => { state.view.todayOffset--; renderAll(); });
-document.getElementById('todayNext').addEventListener('click', () => { state.view.todayOffset++; renderAll(); });
-document.getElementById('weekPrev').addEventListener('click', () => { state.view.weekOffset--; renderAll(); });
-document.getElementById('weekNext').addEventListener('click', () => { state.view.weekOffset++; renderAll(); });
+on('todayPrev', 'click', () => { state.view.todayOffset--; renderAll(); });
+on('todayNext', 'click', () => { state.view.todayOffset++; renderAll(); });
+on('weekPrev', 'click', () => { state.view.weekOffset--; renderAll(); });
+on('weekNext', 'click', () => { state.view.weekOffset++; renderAll(); });
 
 /* ======================= Habits ======================= */
 function habitFreqLabel(h) {
@@ -1039,7 +1057,7 @@ function renderHeatmap(container, h) {
   }
 }
 
-document.getElementById('addHabitBtn').addEventListener('click', () => openHabitSheet(null));
+on('addHabitBtn', 'click', () => openHabitSheet(null));
 
 let activeHabit = null;
 let habitFreqType = 'daily';
@@ -1068,10 +1086,10 @@ function updateFreqUI() {
 document.querySelectorAll('#freqOptions .freq-opt').forEach(btn => {
   btn.addEventListener('click', () => { habitFreqType = btn.dataset.freq; updateFreqUI(); });
 });
-document.getElementById('freqMinus').addEventListener('click', () => { habitFreqCount = Math.max(1, habitFreqCount - 1); updateFreqUI(); });
-document.getElementById('freqPlus').addEventListener('click', () => { habitFreqCount = Math.min(7, habitFreqCount + 1); updateFreqUI(); });
+on('freqMinus', 'click', () => { habitFreqCount = Math.max(1, habitFreqCount - 1); updateFreqUI(); });
+on('freqPlus', 'click', () => { habitFreqCount = Math.min(7, habitFreqCount + 1); updateFreqUI(); });
 
-document.getElementById('habitSaveBtn').addEventListener('click', () => {
+on('habitSaveBtn', 'click', () => {
   const name = document.getElementById('habitNameInput').value.trim();
   if (!name) { toast('Name required'); return; }
   const freq = habitFreqType === 'daily' ? { type: 'daily' } : { type: 'weekly', count: habitFreqCount };
@@ -1086,7 +1104,7 @@ document.getElementById('habitSaveBtn').addEventListener('click', () => {
   renderAll();
 });
 
-document.getElementById('habitClearRecordsBtn').addEventListener('click', () => {
+on('habitClearRecordsBtn', 'click', () => {
   if (!activeHabit) return;
   activeHabit.sessions = [];
   saveState();
@@ -1095,7 +1113,7 @@ document.getElementById('habitClearRecordsBtn').addEventListener('click', () => 
   toast('Records cleared for this habit');
 });
 
-document.getElementById('habitDeleteBtn').addEventListener('click', () => {
+on('habitDeleteBtn', 'click', () => {
   if (!activeHabit) return;
   state.habits = state.habits.filter(x => x.id !== activeHabit.id);
   saveState();
@@ -1266,7 +1284,7 @@ function renderListsSheet() {
   });
 }
 
-document.getElementById('newListBtn').addEventListener('click', () => {
+on('newListBtn', 'click', () => {
   const name = prompt('List name (e.g. "Errands", "Packing list")');
   if (!name || !name.trim()) return;
   state.lists.push({ id: uid(), name: name.trim(), attachedDate: null, items: [] });
@@ -1274,7 +1292,7 @@ document.getElementById('newListBtn').addEventListener('click', () => {
   renderListsSheet();
 });
 
-document.getElementById('listsBtn').addEventListener('click', () => { renderListsSheet(); openSheet('listsSheet'); });
+on('listsBtn', 'click', () => { renderListsSheet(); openSheet('listsSheet'); });
 
 /* ======================= Routines ======================= */
 function fmtMinSec(totalSeconds) {
@@ -1329,7 +1347,7 @@ function renderRoutinesView() {
   });
 }
 
-document.getElementById('newRoutineBtn').addEventListener('click', () => openRoutineEditSheet(null));
+on('newRoutineBtn', 'click', () => openRoutineEditSheet(null));
 
 let activeRoutine = null;
 let workingSteps = [];
@@ -1348,7 +1366,7 @@ function openRoutineEditSheet(r) {
   openSheet('routineEditSheet');
 }
 
-document.getElementById('routineRemindClearBtn').addEventListener('click', () => {
+on('routineRemindClearBtn', 'click', () => {
   document.getElementById('routineRemindInput').value = '';
 });
 
@@ -1416,9 +1434,9 @@ function openDurationPicker() {
   wheelSecCtrl = buildWheelColumn(document.getElementById('wheelSec'), SEC_VALUES, (v) => pad2(v), secs);
 }
 
-document.getElementById('stepDurBtn').addEventListener('click', openDurationPicker);
+on('stepDurBtn', 'click', openDurationPicker);
 
-document.getElementById('durationSetBtn').addEventListener('click', () => {
+on('durationSetBtn', 'click', () => {
   const m = wheelMinCtrl ? wheelMinCtrl.getValue() : 0;
   const s = wheelSecCtrl ? wheelSecCtrl.getValue() : 0;
   let total = m * 60 + s;
@@ -1443,7 +1461,7 @@ function renderWorkingSteps() {
   });
 }
 
-document.getElementById('addStepBtn').addEventListener('click', () => {
+on('addStepBtn', 'click', () => {
   const input = document.getElementById('stepTextInput');
   const text = input.value.trim();
   if (!text) return;
@@ -1454,7 +1472,7 @@ document.getElementById('addStepBtn').addEventListener('click', () => {
   renderWorkingSteps();
 });
 
-document.getElementById('routineSaveBtn').addEventListener('click', () => {
+on('routineSaveBtn', 'click', () => {
   const name = document.getElementById('routineNameInput').value.trim();
   if (!name) { toast('Name required'); return; }
   if (!workingSteps.length) { toast('Add at least one step'); return; }
@@ -1472,7 +1490,7 @@ document.getElementById('routineSaveBtn').addEventListener('click', () => {
   renderRoutinesView();
 });
 
-document.getElementById('routineDeleteBtn').addEventListener('click', () => {
+on('routineDeleteBtn', 'click', () => {
   if (!activeRoutine) return;
   state.routines = state.routines.filter(x => x.id !== activeRoutine.id);
   saveState();
@@ -1555,25 +1573,25 @@ function finishRun() {
   toast('Routine complete');
 }
 
-document.getElementById('runPauseBtn').addEventListener('click', () => {
+on('runPauseBtn', 'click', () => {
   runPaused = !runPaused;
   document.getElementById('runPauseBtn').textContent = runPaused ? 'Resume' : 'Pause';
   if (runPaused) clearInterval(runInterval);
   else runInterval = setInterval(runTick, 1000);
 });
 
-document.getElementById('runPrevBtn').addEventListener('click', () => {
+on('runPrevBtn', 'click', () => {
   if (runIndex > 0) { runIndex--; loadRunStep(); }
 });
-document.getElementById('runNextBtn').addEventListener('click', () => {
+on('runNextBtn', 'click', () => {
   clearInterval(runInterval);
   advanceRunStep();
 });
-document.getElementById('runCloseBtn').addEventListener('click', () => {
+on('runCloseBtn', 'click', () => {
   clearInterval(runInterval);
   document.getElementById('routineRunOverlay').hidden = true;
 });
-document.getElementById('runFinishBtn').addEventListener('click', () => {
+on('runFinishBtn', 'click', () => {
   document.getElementById('routineRunOverlay').hidden = true;
 });
 
@@ -1616,8 +1634,8 @@ function renderChoresView() {
 }
 
 
-document.getElementById('addChoreBtn').addEventListener('click', addChoreFromInput);
-document.getElementById('newChoreInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addChoreFromInput(); } });
+on('addChoreBtn', 'click', addChoreFromInput);
+on('newChoreInput', 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addChoreFromInput(); } });
 function addChoreFromInput() {
   const input = document.getElementById('newChoreInput');
   const name = input.value.trim();
@@ -1669,9 +1687,9 @@ function stopChoreTimer(save) {
   choreRunning = null;
 }
 
-document.getElementById('choreDoneBtn').addEventListener('click', () => stopChoreTimer(true));
-document.getElementById('choreCancelBtn').addEventListener('click', () => stopChoreTimer(false));
-document.getElementById('choreCloseBtn').addEventListener('click', () => stopChoreTimer(false));
+on('choreDoneBtn', 'click', () => stopChoreTimer(true));
+on('choreCancelBtn', 'click', () => stopChoreTimer(false));
+on('choreCloseBtn', 'click', () => stopChoreTimer(false));
 
 /* ======================= Triple alarm stack ======================= */
 /* A PWA cannot create alarms in the iOS Clock app — no web API exists for it.
@@ -1826,7 +1844,7 @@ function renderAlarmStackList() {
   });
 }
 
-document.getElementById('alarmCreateBtn').addEventListener('click', () => {
+on('alarmCreateBtn', 'click', () => {
   const startMin = alarmSelectedMin();
   const label = document.getElementById('alarmLabelInput').value.trim() || 'DayFlow Alarm';
   const stack = { id: uid(), startMin, label, createdAt: Date.now() };
@@ -1884,126 +1902,182 @@ function stopHabitTimer(save) {
   habitTimerRunning = null;
 }
 
-document.getElementById('habitDoneRunBtn').addEventListener('click', () => stopHabitTimer(true));
-document.getElementById('habitCancelBtn').addEventListener('click', () => stopHabitTimer(false));
-document.getElementById('habitRunCloseBtn').addEventListener('click', () => stopHabitTimer(false));
+on('habitDoneRunBtn', 'click', () => stopHabitTimer(true));
+on('habitCancelBtn', 'click', () => stopHabitTimer(false));
+on('habitRunCloseBtn', 'click', () => stopHabitTimer(false));
 
 /* ======================= Voice dictation =======================
-   Uses the Web Speech API, which Safari supports on iOS 14.5+. Recognition
-   itself is handled by the OS/Apple, not by DayFlow. Where it's unavailable
-   (some standalone-PWA builds), we say so plainly and point at the keyboard's
-   own mic key, which always works.
+   Web Speech API. Recognition is performed by the OS, not by DayFlow.
 
-   The mic is a hard toggle. The button's lit state is driven by the engine's
-   own onstart/onend events rather than an optimistic flag, because start()
-   can reject and end can fire on its own — an optimistic flag desyncs from
-   reality and leaves the button stuck on with no way to switch it off. */
+   Two hard-won constraints shape this code:
+
+   1. iOS Safari does not support `continuous = true`. Setting it makes
+      start() fail silently — no onstart, no onerror, nothing. So we run in
+      single-shot mode and re-arm on `onend` ourselves, which gives the same
+      keep-listening feel without tripping over the platform.
+   2. The API object exists in installed (standalone) PWAs on iOS even where
+      it does nothing at all. Feature detection therefore isn't enough: we
+      start a watchdog and, if the engine never reports onstart, we declare it
+      unavailable and hand off to the keyboard's own dictation key.
+
+   The lit state is driven by engine events, never optimistically, so the
+   button can't get stuck on. */
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-let isListening = false;
-let dictationBase = '';
-let stoppedByUser = false;
-let listenTimeout = null;
 
+let recognition = null;
+let micState = 'idle';        // idle | starting | listening | unsupported
+let wantListening = false;    // user intent, survives single-shot restarts
+let stoppedByUser = false;
+let dictationBase = '';       // text already in the field when dictation began
+let committed = '';           // finalised text across re-armed sessions
+let startWatchdog = null;
+let listenCap = null;
+let listenStartedAt = 0;
+
+const START_TIMEOUT_MS = 3000;
 const MAX_LISTEN_MS = 60000;
 
 function voiceSupported() { return !!SpeechRec; }
+function isListening() { return micState === 'listening' || micState === 'starting'; }
 
-function setMicUI(on) {
-  isListening = on;
+function setMicUI(state) {
+  micState = state;
   const btn = document.getElementById('micBtn');
-  btn.classList.toggle('listening', on);
-  btn.setAttribute('aria-label', on ? 'Stop dictation' : 'Dictate');
-  btn.innerHTML = icon(on ? 'stop' : 'mic', on ? 17 : 19, on ? { fill: true, strokeWidth: 0 } : {});
-  clearTimeout(listenTimeout);
-  if (on) listenTimeout = setTimeout(() => stopListening(true), MAX_LISTEN_MS);
+  const live = state === 'listening' || state === 'starting';
+  btn.classList.toggle('listening', live);
+  btn.classList.toggle('starting', state === 'starting');
+  btn.setAttribute('aria-label', live ? 'Stop dictation' : 'Dictate');
+  btn.innerHTML = icon(live ? 'stop' : 'mic', live ? 17 : 19, live ? { fill: true, strokeWidth: 0 } : {});
+}
+
+function writeTranscript(current) {
+  const input = document.getElementById('quickAddInput');
+  const parts = [dictationBase, committed, current].filter(x => x && x.trim());
+  input.value = parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function initRecognition() {
   if (!voiceSupported() || recognition) return recognition;
   recognition = new SpeechRec();
-  recognition.continuous = true;      // don't cut out on a natural pause
+  // Single-shot: `continuous` is unsupported on iOS and breaks start() there.
+  recognition.continuous = false;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
   recognition.lang = navigator.language || 'en-US';
 
-  recognition.onstart = () => setMicUI(true);
+  recognition.onstart = () => {
+    clearTimeout(startWatchdog);
+    setMicUI('listening');
+  };
 
   recognition.onresult = (event) => {
-    let transcript = '';
-    for (let i = 0; i < event.results.length; i++) {
-      transcript += event.results[i][0].transcript;
-    }
-    const input = document.getElementById('quickAddInput');
-    input.value = (dictationBase ? dictationBase + ' ' : '') + transcript.trim();
+    let text = '';
+    for (let i = 0; i < event.results.length; i++) text += event.results[i][0].transcript;
+    recognition._lastText = text.trim();
+    writeTranscript(recognition._lastText);
   };
 
   recognition.onerror = (e) => {
-    setMicUI(false);
+    clearTimeout(startWatchdog);
+    if (e.error === 'no-speech') return;              // onend re-arms us
+    if (e.error === 'aborted') return;
+    wantListening = false;
+    setMicUI('idle');
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      toast('Mic blocked — allow it in Settings › Safari');
-    } else if (e.error === 'no-speech') {
-      toast("Didn't catch anything");
-    } else if (e.error !== 'aborted') {
+      markVoiceUnavailable('Microphone blocked. Allow it in Settings › Safari › Microphone.');
+    } else {
       toast('Dictation error: ' + e.error);
     }
   };
 
-  // Fires on manual stop, natural end, and error alike — the single source of
-  // truth for switching the button back off.
   recognition.onend = () => {
-    setMicUI(false);
-    // Only auto-send when speech ended on its own. If the user tapped to stop,
-    // leave the text alone so they can edit it.
-    if (!stoppedByUser) {
-      const input = document.getElementById('quickAddInput');
-      if (input.value.trim()) {
-        document.getElementById('quickAddForm').requestSubmit();
-      }
+    clearTimeout(startWatchdog);
+    // Carry finalised text forward before the next single-shot session.
+    if (recognition._lastText) {
+      committed = [committed, recognition._lastText].filter(Boolean).join(' ');
+      recognition._lastText = '';
     }
+    const overCap = Date.now() - listenStartedAt > MAX_LISTEN_MS;
+    if (wantListening && !stoppedByUser && !overCap) {
+      try { recognition.start(); return; } catch (err) { /* fall through to idle */ }
+    }
+    wantListening = false;
     stoppedByUser = false;
+    setMicUI('idle');
   };
 
   return recognition;
 }
 
+function markVoiceUnavailable(message) {
+  setMicUI('unsupported');
+  wantListening = false;
+  document.getElementById('micBtn').classList.remove('listening', 'starting');
+  toast(message);
+  document.getElementById('quickAddInput').focus();
+}
+
 function startListening() {
   const rec = initRecognition();
   if (!rec) {
-    toast('Use the mic key on your keyboard instead');
-    document.getElementById('quickAddInput').focus();
+    markVoiceUnavailable('Voice input is not available here — use the mic key on your keyboard.');
     return;
   }
   stoppedByUser = false;
+  wantListening = true;
+  committed = '';
+  rec._lastText = '';
   dictationBase = document.getElementById('quickAddInput').value.trim();
+  listenStartedAt = Date.now();
+
+  setMicUI('starting');
+  clearTimeout(listenCap);
+  listenCap = setTimeout(() => stopListening(true), MAX_LISTEN_MS);
+
+  // If the engine never reports back, it isn't really implemented here.
+  clearTimeout(startWatchdog);
+  startWatchdog = setTimeout(() => {
+    if (micState === 'starting') {
+      try { rec.abort(); } catch (e) { /* nothing running */ }
+      markVoiceUnavailable("Voice input isn't supported in this browser — tap the mic on your keyboard instead.");
+    }
+  }, START_TIMEOUT_MS);
+
   try {
     rec.start();
   } catch (err) {
-    // Already running from a session that never cleanly ended: force it down
-    // and retry once, so the button never gets wedged.
+    // A previous session never cleanly ended; force it down and retry once.
     try { rec.abort(); } catch (e) { /* nothing to abort */ }
-    setMicUI(false);
-    setTimeout(() => { try { rec.start(); } catch (e2) { toast('Mic unavailable — try again'); } }, 200);
+    setTimeout(() => {
+      try { rec.start(); }
+      catch (e2) {
+        clearTimeout(startWatchdog);
+        markVoiceUnavailable('Mic is busy — try again in a moment.');
+      }
+    }, 250);
   }
 }
 
 function stopListening(auto) {
+  clearTimeout(startWatchdog);
+  clearTimeout(listenCap);
   stoppedByUser = !auto;
-  setMicUI(false);
+  wantListening = false;
+  setMicUI('idle');
   if (recognition) {
-    try { recognition.stop(); } catch (e) {
-      try { recognition.abort(); } catch (e2) { /* already down */ }
-    }
+    try { recognition.stop(); }
+    catch (e) { try { recognition.abort(); } catch (e2) { /* already down */ } }
   }
 }
 
-document.getElementById('micBtn').addEventListener('click', () => {
-  if (isListening) stopListening(false);
+on('micBtn', 'click', () => {
+  if (isListening()) stopListening(false);
   else startListening();
 });
 
-// Leaving the app or switching tabs should never leave the mic hot.
+// Never leave the mic hot when the app goes to the background.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && isListening) stopListening(true);
+  if (document.hidden && isListening()) stopListening(true);
 });
 
 /* ======================= Local assistant =======================
@@ -2467,7 +2541,29 @@ function assistantFallback(raw) {
 }
 
 /* ======================= Settings sheet ======================= */
-document.getElementById('settingsBtn').addEventListener('click', () => { applyTheme(); renderRemindersToggle(); openSheet('settingsSheet'); });
+on('settingsBtn', 'click', () => {
+  applyTheme();
+  renderRemindersToggle();
+  document.getElementById('versionNote').textContent = `DayFlow ${APP_VERSION} · built ${APP_BUILT}`;
+  openSheet('settingsSheet');
+});
+
+/* Force a genuinely fresh copy: drop every cache and service worker, then
+   reload. Closing and reopening an installed PWA is not always enough. */
+on('forceUpdateBtn', 'click', async () => {
+  toast('Fetching latest…');
+  try {
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch (e) { /* proceed to reload regardless */ }
+  location.reload();
+});
 
 document.querySelectorAll('#themeOptions .freq-opt').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -2500,7 +2596,7 @@ function renderRemindersToggle() {
   }
 }
 
-document.getElementById('remindersToggleBtn').addEventListener('click', async () => {
+on('remindersToggleBtn', 'click', async () => {
   if (!('Notification' in window)) return;
   if (!state.settings.remindersEnabled) {
     let perm = Notification.permission;
@@ -2568,7 +2664,7 @@ function checkReminders() {
 }
 setInterval(checkReminders, 20000);
 
-document.getElementById('exportBtn').addEventListener('click', () => {
+on('exportBtn', 'click', () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2581,7 +2677,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   toast('Exported');
 });
 
-document.getElementById('importFile').addEventListener('change', (e) => {
+on('importFile', 'change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -2618,7 +2714,7 @@ function emptyState() {
 }
 
 
-document.getElementById('clearPracticeBtn').addEventListener('click', () => {
+on('clearPracticeBtn', 'click', () => {
   const sessionCount = state.habits.reduce((a, h) => a + (h.sessions || []).length, 0)
     + state.chores.reduce((a, c) => a + (c.sessions || []).length, 0);
   if (!sessionCount) { toast('No practice records to clear'); return; }
@@ -2630,7 +2726,7 @@ document.getElementById('clearPracticeBtn').addEventListener('click', () => {
   toast('Practice records cleared');
 });
 
-document.getElementById('clearSampleBtn').addEventListener('click', () => {
+on('clearSampleBtn', 'click', () => {
   if (!confirm('Remove all sample tasks, habits, routines, chores and lists? Your settings stay. This gives you a blank slate.')) return;
   const settings = state.settings;
   const view = state.view;
@@ -2644,7 +2740,7 @@ document.getElementById('clearSampleBtn').addEventListener('click', () => {
   toast('Blank slate — all yours now');
 });
 
-document.getElementById('resetBtn').addEventListener('click', () => {
+on('resetBtn', 'click', () => {
   if (!confirm('Erase everything, including settings? This cannot be undone.')) return;
   state = blankState();
   saveState();
@@ -2655,18 +2751,72 @@ document.getElementById('resetBtn').addEventListener('click', () => {
 });
 
 /* ======================= Sheets generic ======================= */
+/* Every sheet gets a real close affordance. Relying on a backdrop tap alone
+   left tall sheets (Lists, Routine edit, Alarm) with almost no tappable
+   backdrop, which reads as being trapped in the sheet. */
+function installSheetChrome() {
+  document.querySelectorAll('.sheet').forEach(sheet => {
+    if (sheet.querySelector('.sheet-close')) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sheet-close';
+    btn.setAttribute('aria-label', 'Close');
+    btn.innerHTML = icon('x', 18);
+    btn.addEventListener('click', (e) => { e.stopPropagation(); closeSheets(); });
+    sheet.insertBefore(btn, sheet.firstChild);
+
+    // Drag the grab-handle downward to dismiss, like a native sheet.
+    const handle = sheet.querySelector('.sheet-handle');
+    if (!handle) return;
+    let startY = 0, dy = 0, dragging = false;
+    handle.addEventListener('pointerdown', (e) => {
+      dragging = true; startY = e.clientY; dy = 0;
+      sheet.style.transition = 'none';
+      const move = (ev) => {
+        if (!dragging) return;
+        dy = Math.max(0, ev.clientY - startY);
+        sheet.style.transform = `translateY(${dy}px)`;
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        dragging = false;
+        sheet.style.transition = '';
+        sheet.style.transform = '';
+        if (dy > 90) closeSheets();
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    });
+  });
+}
+
 function openSheet(id) {
-  document.getElementById('overlayBackdrop').hidden = false;
-  document.getElementById(id).hidden = false;
-  requestAnimationFrame(() => document.getElementById(id).classList.add('open'));
+  installSheetChrome();
+  const backdrop = document.getElementById('overlayBackdrop');
+  const sheet = document.getElementById(id);
+  if (!sheet) { console.warn('[DayFlow] missing sheet:', id); return; }
+  if (backdrop) backdrop.hidden = false;
+  sheet.hidden = false;
+  sheet.style.transform = '';
+  requestAnimationFrame(() => sheet.classList.add('open'));
 }
 function closeSheets() {
-  document.querySelectorAll('.sheet').forEach(s => s.hidden = true);
+  document.querySelectorAll('.sheet').forEach(s => { s.hidden = true; s.style.transform = ''; });
   document.getElementById('overlayBackdrop').hidden = true;
   activeBlock = null;
   activeHabit = null;
 }
-document.getElementById('overlayBackdrop').addEventListener('click', closeSheets);
+on('overlayBackdrop', 'click', closeSheets);
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheets(); });
+
+// A crash used to be invisible; make it visible so it can be reported.
+window.addEventListener('error', (e) => {
+  console.error('[DayFlow]', e.message);
+  try { toast('Something went wrong — try Settings › Check for update'); } catch (_) {}
+});
 
 /* ======================= Render all ======================= */
 function renderAll() {

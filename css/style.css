@@ -822,3 +822,20 @@ button { font-family: inherit; }
   .tab { font-size: 8.5px; }
   .tab-icon .ico { width: 19px; height: 19px; }
 }
+
+/* Mic: distinguish "waiting for the engine" from "actually listening" */
+.quick-add-mic.starting { opacity: .75; animation: none; }
+.quick-add-mic.starting .ico { animation: micWait .9s infinite ease-in-out; }
+@keyframes micWait { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+
+/* Explicit close affordance on every sheet */
+.sheet-close {
+  position: absolute; top: 10px; right: 12px; z-index: 5;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: none; background: var(--bg-sunken); color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center;
+}
+.sheet-close:active { background: var(--border); }
+.sheet { position: fixed; }
+.sheet-handle { touch-action: none; cursor: grab; padding: 4px 0; }
+.sheet { transition: transform .18s ease; }
