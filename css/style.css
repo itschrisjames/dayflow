@@ -324,7 +324,7 @@ button { font-family: inherit; }
   display: flex; align-items: center; gap: 5px;
 }
 .habit-practice-meta .pr { color: var(--accent); font-weight: 700; }
-.heatmap { display: flex; gap: 2.5px; margin-top: 10px; overflow-x: auto; padding-bottom: 2px; }
+.heatmap { margin-top: 10px; }
 .heatmap-col { display: flex; flex-direction: column; gap: 2.5px; }
 .heatmap-cell { width: 10px; height: 10px; border-radius: 3px; background: var(--bg-sunken); }
 .heatmap-cell.on { background: var(--accent); }
@@ -412,10 +412,7 @@ button { font-family: inherit; }
   max-height: 85vh; overflow-y: auto;
 }
 .sheet-tall { max-height: 90vh; }
-.sheet-handle {
-  width: 36px; height: 4px; background: var(--border); border-radius: 3px;
-  margin: 6px auto 10px;
-}
+.sheet-handle { background: none; }
 .sheet-body { padding: 4px 18px 0; }
 .sheet-body h2 { font-size: 17px; margin: 4px 0 14px; }
 .sheet-input {
@@ -837,5 +834,79 @@ button { font-family: inherit; }
 }
 .sheet-close:active { background: var(--border); }
 .sheet { position: fixed; }
-.sheet-handle { touch-action: none; cursor: grab; padding: 4px 0; }
+/* Bigger, more obviously grabbable handle */
+.sheet-handle {
+  touch-action: none; cursor: grab; padding: 8px 0; margin: 2px auto 8px;
+  width: 100%; display: flex; justify-content: center;
+}
+.sheet-handle::before {
+  content: ""; width: 42px; height: 5px; border-radius: 3px; background: var(--border);
+}
+.sheet { overscroll-behavior: contain; }
 .sheet { transition: transform .18s ease; }
+
+/* ---------- Multi-count habits ---------- */
+.habit-check { position: relative; overflow: hidden; }
+.hc-ring {
+  position: absolute; inset: -2px; border-radius: 50%;
+  -webkit-mask: radial-gradient(circle, transparent 58%, #000 60%);
+          mask: radial-gradient(circle, transparent 58%, #000 60%);
+  transition: background .2s ease;
+}
+.hc-count {
+  position: relative; z-index: 1;
+  font-size: 13px; font-weight: 800; color: var(--text);
+  display: flex; align-items: baseline; gap: 1px; line-height: 1;
+}
+.hc-target { font-size: 9px; font-weight: 700; color: var(--text-faint); }
+.habit-check.checked .hc-count { color: var(--accent-text); }
+.habit-check.checked .hc-target { color: var(--accent-text); opacity: .75; }
+.habit-check.checked .hc-ring { display: none; }
+
+/* Version badge in Settings */
+.version-chip {
+  background: var(--bg-sunken); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 20px;
+  padding: 5px 12px; font-size: 12px; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keep the version badge clear of the sheet's close button */
+.sheet-header-row.title-with-chip { justify-content: flex-start; gap: 10px; padding-right: 44px; }
+.sheet-body > .sheet-header-row:first-child { padding-right: 44px; }
+
+/* Version readout under the update button */
+.version-readout {
+  text-align: center; margin: -4px 0 10px;
+  font-size: 15px; font-weight: 800; color: var(--accent);
+  font-variant-numeric: tabular-nums; letter-spacing: .01em;
+}
+.version-readout .built { display: block; font-size: 11.5px; font-weight: 600; color: var(--text-faint); margin-top: 2px; }
+
+/* ---------- Month chain (one box per day of the current month) ---------- */
+.month-grid {
+  display: grid; grid-template-columns: repeat(7, 26px);
+  gap: 5px; margin-top: 2px; justify-content: start;
+}
+.month-head { margin-bottom: 2px; }
+.month-dow {
+  width: 26px; text-align: center;
+  font-size: 9px; font-weight: 800; color: var(--text-faint);
+  letter-spacing: .02em;
+}
+.month-cell {
+  width: 26px; height: 26px; border-radius: 6px;
+  background: var(--bg-sunken);
+  border: 1px solid transparent;
+}
+.month-cell.pad { background: transparent; }
+.month-cell.on { background: var(--accent); }
+.month-cell.future { background: transparent; border: 1px dashed var(--border); }
+.month-cell.today { border: 2px solid var(--text-dim); }
+.month-cell.today.on { border-color: var(--text); }
+.month-caption {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  margin-top: 8px; font-size: 11px; color: var(--text-faint); font-weight: 600;
+}
+.month-caption .chain { color: var(--accent); font-weight: 800; }
+.month-caption .chain.quiet { color: var(--text-faint); font-weight: 600; }

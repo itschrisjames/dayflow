@@ -191,6 +191,14 @@
         <button type="button" class="freq-opt" data-freq="weekly">× per week</button>
       </div>
     </div>
+    <div class="sheet-row">
+      <label>Times per day</label>
+      <div class="stepper">
+        <button type="button" id="targetMinus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+        <span id="targetLabel">1</span>
+        <button type="button" id="targetPlus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+    </div>
     <div class="sheet-row" id="freqCountRow" hidden>
       <label>Times / week</label>
       <div class="stepper">
@@ -349,7 +357,10 @@
 <div id="settingsSheet" class="sheet" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
-    <h2>Settings</h2>
+    <div class="sheet-header-row title-with-chip">
+      <h2 style="margin:4px 0;">Settings</h2>
+      <span class="version-chip" id="versionChip">v—</span>
+    </div>
     <div class="sheet-row">
       <label>Reminders</label>
       <button type="button" id="remindersToggleBtn" class="freq-opt" style="flex:none;padding:9px 18px;">Off</button>
@@ -382,10 +393,10 @@
       <button id="resetBtn" class="pill-btn danger">Erase everything</button>
     </div>
     <div class="sheet-actions">
-      <button id="forceUpdateBtn" class="pill-btn">Check for update</button>
+      <button id="forceUpdateBtn" class="pill-btn accent">Check for update</button>
     </div>
+    <div class="version-readout" id="versionNote"></div>
     <p class="settings-note">All data stays on this device. Export regularly to keep a backup.</p>
-    <p class="settings-note" id="versionNote"></p>
   </div>
 </div>
 

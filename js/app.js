@@ -15,7 +15,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v7';
+const APP_VERSION = 'v10';
 const APP_BUILT = '2026-08-14';
 
 /* ======================= Storage ======================= */
@@ -52,6 +52,53 @@ const minToTimeInput = (min) => `${pad2(Math.floor(min / 60))}:${pad2(min % 60)}
 const WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const WDFULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+/* ======================= Time in captured text =======================
+   "call mum at 3pm" should land on today's grid at 15:00 without the user
+   opening anything. Deliberately conservative: a bare number never counts as
+   a time, so "buy 2 pints" stays a plain task. */
+function extractTimeFromTitle(raw) {
+  const text = String(raw || '');
+
+  const attempts = [
+    // 3pm · 3:30 pm · at 11.45am
+    { re: /\s*(?:\bat\b\s*|@\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*([ap])\.?m\.?\b/i,
+      build: (m) => {
+        let h = parseInt(m[1], 10);
+        const min = m[2] ? parseInt(m[2], 10) : 0;
+        if (h < 1 || h > 12 || min > 59) return null;
+        if (/p/i.test(m[3]) && h !== 12) h += 12;
+        if (/a/i.test(m[3]) && h === 12) h = 0;
+        return h * 60 + min;
+      } },
+    // at 15:45 (24h needs the "at" and a colon, so dates/scores don't match)
+    { re: /\s*(?:\bat\b\s*|@\s*)(\d{1,2}):(\d{2})\b/,
+      build: (m) => {
+        const h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+        if (h > 23 || min > 59) return null;
+        return h * 60 + min;
+      } },
+    // noon / midday / midnight
+    { re: /\s*(?:\bat\b\s+|@\s*)?(noon|midday|midnight)\b/i,
+      build: (m) => (/midnight/i.test(m[1]) ? 0 : 12 * 60) },
+  ];
+
+  for (const a of attempts) {
+    const m = text.match(a.re);
+    if (!m) continue;
+    const startMin = a.build(m);
+    if (startMin == null) continue;
+    const title = (text.slice(0, m.index) + ' ' + text.slice(m.index + m[0].length))
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([,.;:!?])/g, '$1')
+      .trim()
+      .replace(/[\s,–@-]+$/, '')
+      .trim();
+    if (!title) continue;              // the text was only a time; keep it as-is
+    return { title, startMin };
+  }
+  return null;
+}
 
 /* ======================= Urgency ("when") =======================
    Optional and always set after the fact — capture stays one tap + type, per
@@ -131,7 +178,17 @@ function blankState() {
 
 /* ======================= State ======================= */
 function ensureHabitSessions(s) {
-  (s.habits || []).forEach(h => { if (!h.sessions) h.sessions = []; });
+  (s.habits || []).forEach(h => {
+    if (!h.sessions) h.sessions = [];
+    // Habits can now be checked off several times a day. Older data stored a
+    // plain boolean per day; treat that as a single completion.
+    if (!h.dailyTarget || h.dailyTarget < 1) h.dailyTarget = 1;
+    const c = h.completions || (h.completions = {});
+    Object.keys(c).forEach(k => {
+      if (c[k] === true) c[k] = 1;
+      else if (typeof c[k] !== 'number' || c[k] <= 0) delete c[k];
+    });
+  });
 }
 
 function ensureNewCollections(s) {
@@ -153,6 +210,9 @@ if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabl
 if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
 ensureHabitSessions(state);
 ensureNewCollections(state);
+// Persist any schema migration immediately, so the stored copy matches what
+// the app is actually working with rather than waiting for the next edit.
+saveState();
 
 /* ======================= Theme ======================= */
 const COLOR_SCHEMES = [
@@ -815,7 +875,7 @@ on('quickAddForm', 'submit', (e) => {
   }
 
   if (quickAddMode === 'habit') {
-    state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {}, sessions: [] });
+    state.habits.push({ id: uid(), name: title, freq: { type: 'daily' }, completions: {}, sessions: [], dailyTarget: 1 });
     saveState();
     input.value = '';
     setQuickAddMode('task');
@@ -824,7 +884,21 @@ on('quickAddForm', 'submit', (e) => {
     return;
   }
 
+  const parsed = extractTimeFromTitle(title);
   const dateForNew = state.view.current === 'today' ? currentTodayDateStr() : null;
+
+  if (parsed) {
+    // A stated time means it belongs on today's schedule, not the inbox.
+    state.tasks.push({ id: uid(), title: parsed.title, date: dateForNew || todayStr(),
+      startMin: parsed.startMin, durationMin: 30, done: false, createdAt: Date.now() });
+    input.value = '';
+    saveState();
+    if (!state.settings.showSchedule) { state.settings.showSchedule = true; saveState(); }
+    renderAll();
+    toast(`Scheduled for ${minToLabel(parsed.startMin)}`);
+    return;
+  }
+
   state.tasks.push({ id: uid(), title, date: dateForNew, startMin: null, durationMin: 30, done: false, createdAt: Date.now() });
   input.value = '';
   saveState();
@@ -922,10 +996,26 @@ on('weekNext', 'click', () => { state.view.weekOffset++; renderAll(); });
 
 /* ======================= Habits ======================= */
 function habitFreqLabel(h) {
-  return h.freq.type === 'daily' ? 'Daily' : `${h.freq.count}× / week`;
+  const base = h.freq.type === 'daily' ? 'Daily' : `${h.freq.count}× / week`;
+  const t = habitTarget(h);
+  return t > 1 ? `${base} · ${t}× a day` : base;
 }
 
-function habitDoneOn(h, ds) { return !!h.completions[ds]; }
+function habitTarget(h) { return Math.max(1, h.dailyTarget || 1); }
+function habitCount(h, ds) {
+  const v = h.completions[ds];
+  return typeof v === 'number' ? v : (v ? 1 : 0);
+}
+// "Done" still means the day's goal was met, so streaks work unchanged.
+function habitDoneOn(h, ds) { return habitCount(h, ds) >= habitTarget(h); }
+
+function bumpHabit(h, ds, delta) {
+  const next = Math.max(0, habitCount(h, ds) + delta);
+  if (next === 0) delete h.completions[ds];
+  else h.completions[ds] = next;
+  saveState();
+  return next;
+}
 
 function computeStreak(h) {
   // current streak: consecutive qualifying periods up to today with completion
@@ -1004,7 +1094,7 @@ function renderHabits() {
     const avg = habitAvgSession(h);
     card.innerHTML = `
       <div class="habit-top">
-        <div class="habit-check ${done ? 'checked' : ''}">${icon('check', 19, {strokeWidth: 2.4})}</div>
+        <div class="habit-check ${done ? 'checked' : ''}">${habitCheckInner(h, ds)}</div>
         <div class="habit-info">
           <div class="habit-name">${escapeHtml(h.name)}</div>
           <div class="habit-freq">${habitFreqLabel(h)}</div>
@@ -1019,17 +1109,45 @@ function renderHabits() {
       ${pr != null ? `<div class="habit-practice-meta">${icon('trophy', 13)} PR <span class="pr">${fmtMinSec(pr)}</span> · avg ${fmtMinSec(avg)} · total ${fmtMinSec(habitTotalPracticeSeconds(h))}</div>` : ''}
     `;
     const checkEl = card.querySelector('.habit-check');
-    checkEl.addEventListener('click', () => {
-      h.completions[ds] = !h.completions[ds];
-      if (!h.completions[ds]) delete h.completions[ds];
-      saveState();
-      checkEl.classList.toggle('checked', !!h.completions[ds]);
-      
+    const refresh = () => {
+      checkEl.classList.toggle('checked', habitDoneOn(h, ds));
+      checkEl.innerHTML = habitCheckInner(h, ds);
+      checkEl.classList.add('pop');
+      setTimeout(() => checkEl.classList.remove('pop'), 320);
       const nEl = card.querySelector('.n');
       nEl.textContent = computeStreak(h);
       nEl.classList.add('tick');
       setTimeout(() => nEl.classList.remove('tick'), 320);
       renderHeatmap(card.querySelector('.heatmap'), h);
+    };
+
+    // Tap always moves forward; press-and-hold takes one back.
+    let held = false, holdTimer = null;
+    checkEl.addEventListener('pointerdown', () => {
+      held = false;
+      holdTimer = setTimeout(() => {
+        held = true;
+        if (habitCount(h, ds) > 0) {
+          bumpHabit(h, ds, -1);
+          refresh();
+          toast(habitTarget(h) > 1 ? `Removed one — ${habitCount(h, ds)}/${habitTarget(h)} today` : 'Unchecked');
+        }
+      }, 500);
+    });
+    const cancelHold = () => clearTimeout(holdTimer);
+    checkEl.addEventListener('pointerup', cancelHold);
+    checkEl.addEventListener('pointerleave', cancelHold);
+    checkEl.addEventListener('pointercancel', cancelHold);
+
+    checkEl.addEventListener('click', () => {
+      if (held) { held = false; return; }
+      const target = habitTarget(h);
+      if (target === 1 && habitCount(h, ds) >= 1) bumpHabit(h, ds, -1);  // single-target stays a toggle
+      else bumpHabit(h, ds, 1);
+      refresh();
+      const now = habitCount(h, ds);
+      if (target > 1 && now === target) toast(`${h.name} complete for today`);
+      else if (target > 1 && now > 0) toast(`${now}/${target} today`);
     });
     card.querySelector('.habit-name').addEventListener('click', () => openHabitSheet(h));
     card.querySelector('.habit-practice-btn').addEventListener('click', () => startHabitTimer(h));
@@ -1038,23 +1156,75 @@ function renderHabits() {
   });
 }
 
+/* Single-target habits show a tick; multi-target ones become a counter with a
+   ring that fills as the day's tally climbs. */
+function habitCheckInner(h, ds) {
+  const target = habitTarget(h);
+  if (target === 1) return icon('check', 19, { strokeWidth: 2.4 });
+  const count = habitCount(h, ds);
+  const pct = Math.min(1, count / target) * 360;
+  return `<span class="hc-ring" style="background: conic-gradient(var(--accent) ${pct}deg, transparent 0deg)"></span>` +
+         `<span class="hc-count">${count}<span class="hc-target">/${target}</span></span>`;
+}
+
+/* One box per day of the current month, laid out as a calendar so an unbroken
+   run reads as a literal chain and a gap is impossible to miss. */
 function renderHeatmap(container, h) {
   container.innerHTML = '';
-  const weeks = 12;
   const today = new Date();
-  const start = addDays(startOfWeek(today), -(weeks - 1) * 7);
-  for (let w = 0; w < weeks; w++) {
-    const col = document.createElement('div');
-    col.className = 'heatmap-col';
-    for (let d = 0; d < 7; d++) {
-      const day = addDays(start, w * 7 + d);
-      if (day > today) { const cell = document.createElement('div'); cell.className = 'heatmap-cell'; cell.style.visibility = 'hidden'; col.appendChild(cell); continue; }
-      const cell = document.createElement('div');
-      cell.className = 'heatmap-cell' + (habitDoneOn(h, dateStr(day)) ? ' on' : '');
-      col.appendChild(cell);
-    }
-    container.appendChild(col);
+  const year = today.getFullYear(), month = today.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstWeekday = new Date(year, month, 1).getDay();   // 0 = Sunday
+  const leading = (firstWeekday + 6) % 7;                   // grid starts Monday
+  const target = habitTarget(h);
+  const todayDate = today.getDate();
+
+  const head = document.createElement('div');
+  head.className = 'month-grid month-head';
+  ['M', 'T', 'W', 'T', 'F', 'S', 'S'].forEach(d => {
+    const c = document.createElement('div');
+    c.className = 'month-dow';
+    c.textContent = d;
+    head.appendChild(c);
+  });
+  container.appendChild(head);
+
+  const grid = document.createElement('div');
+  grid.className = 'month-grid';
+
+  for (let i = 0; i < leading; i++) {
+    const pad = document.createElement('div');
+    pad.className = 'month-cell pad';
+    grid.appendChild(pad);
   }
+
+  let hit = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = dateStr(new Date(year, month, d));
+    const count = habitCount(h, ds);
+    const cell = document.createElement('div');
+    cell.className = 'month-cell';
+    if (count > 0) {
+      cell.classList.add('on');
+      hit++;
+      if (count < target) cell.style.opacity = String(0.35 + 0.5 * (count / target));
+    }
+    if (d === todayDate) cell.classList.add('today');
+    if (d > todayDate) cell.classList.add('future');
+    cell.title = `${MON[month]} ${d}${target > 1 ? ` — ${count}/${target}` : ''}`;
+    grid.appendChild(cell);
+  }
+  container.appendChild(grid);
+
+  const caption = document.createElement('div');
+  caption.className = 'month-caption';
+  const streak = computeStreak(h);
+  const remaining = daysInMonth - todayDate;
+  caption.innerHTML = `<span>${MON[month]} · ${hit}/${daysInMonth} days</span>` +
+    (streak > 1
+      ? `<span class="chain">chain of ${streak} — don't break it</span>`
+      : `<span class="chain quiet">${remaining} day${remaining === 1 ? '' : 's'} left this month</span>`);
+  container.appendChild(caption);
 }
 
 on('addHabitBtn', 'click', () => openHabitSheet(null));
@@ -1062,12 +1232,14 @@ on('addHabitBtn', 'click', () => openHabitSheet(null));
 let activeHabit = null;
 let habitFreqType = 'daily';
 let habitFreqCount = 3;
+let habitDailyTarget = 1;
 
 function openHabitSheet(h) {
   activeHabit = h;
   document.getElementById('habitNameInput').value = h ? h.name : '';
   habitFreqType = h ? h.freq.type : 'daily';
   habitFreqCount = h && h.freq.type === 'weekly' ? h.freq.count : 3;
+  habitDailyTarget = h ? habitTarget(h) : 1;
   updateFreqUI();
   document.getElementById('habitDeleteBtn').hidden = !h;
   const clearBtn = document.getElementById('habitClearRecordsBtn');
@@ -1079,9 +1251,16 @@ function openHabitSheet(h) {
 
 function updateFreqUI() {
   document.querySelectorAll('#freqOptions .freq-opt').forEach(b => b.classList.toggle('active', b.dataset.freq === habitFreqType));
-  document.getElementById('freqCountRow').hidden = habitFreqType !== 'weekly';
-  document.getElementById('freqCountLabel').textContent = habitFreqCount;
+  const row = document.getElementById('freqCountRow');
+  if (row) row.hidden = habitFreqType !== 'weekly';
+  const fc = document.getElementById('freqCountLabel');
+  if (fc) fc.textContent = habitFreqCount;
+  const tl = document.getElementById('targetLabel');
+  if (tl) tl.textContent = habitDailyTarget;
 }
+
+on('targetMinus', 'click', () => { habitDailyTarget = Math.max(1, habitDailyTarget - 1); updateFreqUI(); });
+on('targetPlus',  'click', () => { habitDailyTarget = Math.min(30, habitDailyTarget + 1); updateFreqUI(); });
 
 document.querySelectorAll('#freqOptions .freq-opt').forEach(btn => {
   btn.addEventListener('click', () => { habitFreqType = btn.dataset.freq; updateFreqUI(); });
@@ -1096,8 +1275,9 @@ on('habitSaveBtn', 'click', () => {
   if (activeHabit) {
     activeHabit.name = name;
     activeHabit.freq = freq;
+    activeHabit.dailyTarget = habitDailyTarget;
   } else {
-    state.habits.push({ id: uid(), name, freq, completions: {}, sessions: [] });
+    state.habits.push({ id: uid(), name, freq, completions: {}, sessions: [], dailyTarget: habitDailyTarget });
   }
   saveState();
   closeSheets();
@@ -1887,7 +2067,7 @@ function stopHabitTimer(save) {
     const ds = todayStr();
     h.sessions.push({ date: ds, seconds: elapsed });
     const wasAlreadyDone = habitDoneOn(h, ds);
-    h.completions[ds] = true;
+    bumpHabit(h, ds, 1);
     saveState();
 
     if (prevPR == null) {
@@ -2225,6 +2405,13 @@ function assistantRespond(raw) {
   if (m && !/habit|routine|alarm|list/.test(m[1].slice(0, 12))) {
     const title = raw.trim().replace(/^(?:add|new|create)\s+(?:a\s+)?(?:task\s+)?(?:called\s+)?/i, '').trim();
     if (title) {
+      const parsed = extractTimeFromTitle(title);
+      if (parsed) {
+        state.tasks.push({ id: uid(), title: parsed.title, date: ds, startMin: parsed.startMin,
+          durationMin: 30, done: false, createdAt: Date.now() });
+        saveState(); renderAll();
+        return `Scheduled **${parsed.title}** for today at ${minToLabel(parsed.startMin)}.`;
+      }
       state.tasks.push({ id: uid(), title, date: ds, startMin: null, durationMin: 30, done: false, createdAt: Date.now() });
       saveState(); renderAll();
       return `Added **${title}** to today's inbox. It's untimed — drag it onto the schedule whenever you want, or leave it there.`;
@@ -2234,7 +2421,7 @@ function assistantRespond(raw) {
   m = q.match(/^(?:add|new|create|track)\s+(?:a\s+)?habit\s+(?:called\s+)?(.+)$/);
   if (m) {
     const name = raw.trim().replace(/^(?:add|new|create|track)\s+(?:a\s+)?habit\s+(?:called\s+)?/i, '').trim();
-    state.habits.push({ id: uid(), name, freq: { type: 'daily' }, completions: {}, sessions: [] });
+    state.habits.push({ id: uid(), name, freq: { type: 'daily' }, completions: {}, sessions: [], dailyTarget: 1 });
     saveState(); renderAll();
     return `Tracking **${name}** as a daily habit from today. You can change it to an x-per-week habit by tapping its name on the Habits tab.`;
   }
@@ -2318,6 +2505,10 @@ function assistantRespond(raw) {
 
   if (/(habit|inbox|task).*(list|show|all)|^habits?$|^tasks?$/.test(q)) {
     return listReport(q);
+  }
+
+  if (/(what version|which version|build|update)/.test(q)) {
+    return `You're running **DayFlow ${APP_VERSION}**, built ${APP_BUILT}.\n\nIf that looks older than you expect, open Settings and tap "Check for update" — it clears the cache and reloads.`;
   }
 
   if (/(help|what can you do|commands)/.test(q)) {
@@ -2431,7 +2622,9 @@ function streakReport() {
     .sort((a, b) => b.cur - a.cur)
     .forEach(({ h, cur, best }) => {
       const flame = cur >= 7 ? ' ●' : '';
-      out += `${h.name} — now {{${cur}}}, best {{${best}}}${flame}\n`;
+      const t = habitTarget(h);
+      const todayBit = t > 1 ? ` · today {{${habitCount(h, todayStr())}/${t}}}` : '';
+      out += `${h.name} — now {{${cur}}}, best {{${best}}}${flame}${todayBit}\n`;
     });
   const atRisk = state.habits.filter(h => computeStreak(h) > 2 && !habitDoneOn(h, todayStr()));
   if (atRisk.length) out += `\nStill unchecked today: **${atRisk.map(h => h.name).join(', ')}** — worth protecting.`;
@@ -2544,14 +2737,19 @@ function assistantFallback(raw) {
 on('settingsBtn', 'click', () => {
   applyTheme();
   renderRemindersToggle();
-  document.getElementById('versionNote').textContent = `DayFlow ${APP_VERSION} · built ${APP_BUILT}`;
+  const chip = document.getElementById('versionChip');
+  if (chip) chip.textContent = APP_VERSION;
+  const note = document.getElementById('versionNote');
+  if (note) note.innerHTML = `You're on ${APP_VERSION}<span class="built">built ${APP_BUILT}</span>`;
   openSheet('settingsSheet');
 });
 
 /* Force a genuinely fresh copy: drop every cache and service worker, then
    reload. Closing and reopening an installed PWA is not always enough. */
 on('forceUpdateBtn', 'click', async () => {
-  toast('Fetching latest…');
+  const btn = document.getElementById('forceUpdateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Updating…'; }
+  toast('Clearing cache…');
   try {
     if (window.caches) {
       const keys = await caches.keys();
@@ -2561,8 +2759,13 @@ on('forceUpdateBtn', 'click', async () => {
       const regs = await navigator.serviceWorker.getRegistrations();
       await Promise.all(regs.map(r => r.unregister()));
     }
-  } catch (e) { /* proceed to reload regardless */ }
-  location.reload();
+  } catch (e) {
+    console.warn('[DayFlow] cache clear failed', e);
+  }
+  // A plain reload can still be served from the HTTP cache in an installed
+  // PWA, so navigate to a one-off URL instead. The marker is stripped on boot.
+  const base = location.href.split('?')[0].split('#')[0];
+  location.replace(base + '?fresh=' + Date.now());
 });
 
 document.querySelectorAll('#themeOptions .freq-opt').forEach(btn => {
@@ -2766,30 +2969,71 @@ function installSheetChrome() {
     btn.addEventListener('click', (e) => { e.stopPropagation(); closeSheets(); });
     sheet.insertBefore(btn, sheet.firstChild);
 
-    // Drag the grab-handle downward to dismiss, like a native sheet.
-    const handle = sheet.querySelector('.sheet-handle');
-    if (!handle) return;
-    let startY = 0, dy = 0, dragging = false;
-    handle.addEventListener('pointerdown', (e) => {
-      dragging = true; startY = e.clientY; dy = 0;
-      sheet.style.transition = 'none';
-      const move = (ev) => {
-        if (!dragging) return;
-        dy = Math.max(0, ev.clientY - startY);
-        sheet.style.transform = `translateY(${dy}px)`;
-      };
-      const up = () => {
-        document.removeEventListener('pointermove', move);
-        document.removeEventListener('pointerup', up);
-        dragging = false;
-        sheet.style.transition = '';
-        sheet.style.transform = '';
-        if (dy > 90) closeSheets();
-      };
-      document.addEventListener('pointermove', move);
-      document.addEventListener('pointerup', up);
-    });
+    makeSheetDismissible(sheet);
   });
+}
+
+/* Pull-to-dismiss across the whole sheet, not just the grab handle.
+   Rules that keep it from fighting the sheet's own scrolling:
+     - only arm when the sheet is already scrolled to the top
+     - an upward first move disarms, so scrolling still works
+     - controls that scroll themselves (the wheel picker) are excluded
+     - the click that follows a drag is swallowed, so releasing over a
+       button doesn't also trigger it */
+function makeSheetDismissible(sheet) {
+  if (sheet._dragBound) return;
+  sheet._dragBound = true;
+
+  const DRAG_START = 10;    // px before we treat it as a drag
+  const DISMISS_AT = 110;   // px travelled to actually close
+  let startY = 0, dy = 0, dragging = false, armed = false;
+
+  const swallowClick = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+
+  sheet.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button, a, label, input, textarea, select, .wheel-col, .heatmap')) return;
+    if (sheet.scrollTop > 0) return;
+
+    armed = true; dragging = false; startY = e.clientY; dy = 0;
+
+    const move = (ev) => {
+      if (!armed) return;
+      const d = ev.clientY - startY;
+      if (!dragging) {
+        if (d < -6) { armed = false; return; }        // moving up: let it scroll
+        if (d < DRAG_START) return;
+        dragging = true;
+        sheet.style.transition = 'none';
+      }
+      dy = Math.max(0, d);
+      sheet.style.transform = `translateY(${dy}px)`;
+      if (ev.cancelable) ev.preventDefault();
+    };
+
+    const finish = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', finish);
+      document.removeEventListener('pointercancel', finish);
+      if (dragging) {
+        sheet.style.transition = '';
+        if (dy > DISMISS_AT) closeSheets();
+        else sheet.style.transform = '';
+        sheet.addEventListener('click', swallowClick, true);
+        setTimeout(() => sheet.removeEventListener('click', swallowClick, true), 0);
+      }
+      armed = false; dragging = false;
+    };
+
+    document.addEventListener('pointermove', move, { passive: false });
+    document.addEventListener('pointerup', finish);
+    document.addEventListener('pointercancel', finish);
+  });
+
+  // Safari can begin native scrolling before pointermove is honoured; block it
+  // outright while a dismiss drag is in flight.
+  sheet.addEventListener('touchmove', (e) => {
+    if (dragging && e.cancelable) e.preventDefault();
+  }, { passive: false });
 }
 
 function openSheet(id) {
@@ -2827,6 +3071,11 @@ function renderAll() {
   if (state.view.current === 'chores') renderChoresView();
   if (state.view.current === 'chat') renderChat();
   if (state.view.current === 'stats') renderStats();
+}
+
+/* Drop the ?fresh= marker left by a forced update so it doesn't linger. */
+if (location.search.includes('fresh=')) {
+  try { history.replaceState(null, '', location.pathname); } catch (e) { /* non-fatal */ }
 }
 
 /* ======================= Init ======================= */
