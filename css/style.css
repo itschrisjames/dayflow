@@ -961,3 +961,202 @@ button { font-family: inherit; }
   margin-bottom: 10px; padding-left: 2px;
 }
 .setup-steps li strong { font-weight: 800; }
+
+/* ============================================================
+   v20 — ADHD-focused additions
+   ============================================================ */
+
+/* ---------- One-tap start ---------- */
+/* The smallest possible commitment, sitting on every inbox row. Deliberately
+   the only accent-coloured thing on the row, because starting is the action
+   that matters and organising is not. */
+.start5-btn {
+  display: inline-flex; align-items: center; gap: 3px;
+  flex-shrink: 0; margin-left: auto;
+  min-width: 46px; height: 30px; padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 11.5px; font-weight: 800; letter-spacing: .01em;
+}
+.start5-btn:active { background: var(--accent); color: var(--accent-text); transform: scale(0.94); }
+.inbox-item .swipe-content .title { min-width: 0; }
+
+.step-input { margin-top: 10px; font-size: 14px; }
+.typical-note { text-align: left !important; margin: 6px 0 0 !important; color: var(--accent); font-weight: 600; }
+.start-actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.start-actions .primary-btn { margin: 0; flex: 1; }
+.start-actions .pill-btn { flex: none; }
+.start-now { display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* ---------- Task focus timer ---------- */
+.task-run-step {
+  font-size: 15px; font-weight: 700; color: var(--accent);
+  text-align: center; margin-bottom: 6px; padding: 0 24px;
+}
+.task-run-over {
+  margin-top: 10px; text-align: center; font-size: 12.5px; font-weight: 600;
+  color: var(--text-dim); padding: 0 28px; line-height: 1.45;
+}
+.chore-stopwatch-num.overtime { color: var(--text-dim); }
+.next-up-label {
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--text-faint); margin-bottom: 4px;
+}
+
+/* ---------- Ambient time bar ---------- */
+/* Time blindness doesn't respond to a number. It responds to something that
+   visibly runs out. */
+.time-bar {
+  position: fixed; left: 0; right: 0; bottom: calc(122px + var(--safe-bottom));
+  max-width: 480px; margin: 0 auto; padding: 0 14px;
+  z-index: 40; pointer-events: none;
+}
+.time-bar .tb-track {
+  height: 4px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.time-bar .tb-fill {
+  height: 100%; width: 0%; border-radius: 2px;
+  background: var(--accent); transition: width .8s linear;
+}
+.time-bar .tb-label {
+  margin-top: 4px; font-size: 11px; font-weight: 700;
+  color: var(--text-faint); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.time-bar.active .tb-label { color: var(--text-dim); }
+.time-bar.urgent .tb-fill { background: var(--danger, #e5533d); }
+.time-bar.urgent .tb-label { color: var(--danger, #e5533d); }
+
+/* ---------- Undo bar ---------- */
+.undo-bar {
+  position: fixed; left: 0; right: 0; bottom: calc(150px + var(--safe-bottom));
+  max-width: 440px; margin: 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 14px; border-radius: 22px;
+  background: var(--text); color: var(--bg);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+  z-index: 75; width: calc(100% - 32px);
+}
+.undo-bar .ub-label {
+  flex: 1; min-width: 0; font-size: 13px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.undo-bar .ub-btn {
+  flex-shrink: 0; border: none; border-radius: 16px; padding: 8px 16px;
+  background: var(--bg); color: var(--text); font-size: 13px; font-weight: 800;
+}
+.undo-bar .ub-close {
+  flex-shrink: 0; width: 32px; height: 32px; border: none; border-radius: 16px;
+  background: transparent; color: var(--bg); opacity: .65;
+}
+
+/* ---------- Focus 3 ---------- */
+.inbox-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.focus-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 11px; border-radius: 15px;
+  border: 1px solid var(--border); background: var(--bg-elev);
+  color: var(--text-dim); font-size: 11.5px; font-weight: 800;
+  text-transform: none; letter-spacing: 0;
+}
+.focus-btn .ico { width: 14px; height: 14px; }
+.focus-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.focus-note {
+  padding: 8px 16px 0; font-size: 12px; font-weight: 600;
+  color: var(--text-faint); text-align: center;
+}
+
+/* ---------- Carry forward / Someday ---------- */
+.carry-row { padding: 4px 16px 0; }
+.carry-btn {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; min-height: 42px; padding: 0 14px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--radius); background: transparent;
+  color: var(--accent); font-size: 13px; font-weight: 700;
+}
+.carry-btn:active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.someday-row-wrap { padding: 10px 16px 0; }
+.someday-btn {
+  width: 100%; min-height: 40px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-faint); font-size: 12.5px; font-weight: 700;
+}
+.someday-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; margin-bottom: 8px;
+  background: var(--bg-sunken); border-radius: var(--radius);
+}
+.someday-row .sd-title {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- Habits: effort over perfection ---------- */
+.habit-showed {
+  margin-top: 8px; font-size: 11.5px; font-weight: 600;
+  color: var(--text-faint); line-height: 1.4;
+}
+.habit-showed strong { color: var(--text-dim); font-weight: 800; }
+
+/* ---------- Stats & recap ---------- */
+.stats-encourage {
+  margin: 2px 16px 12px; font-size: 13px; line-height: 1.5;
+  font-weight: 600; color: var(--text-dim);
+}
+.recap-hero { text-align: center; padding: 6px 0 16px; }
+.recap-hero .rh-num { font-size: 46px; font-weight: 800; color: var(--accent); line-height: 1; }
+.recap-hero .rh-lbl { margin-top: 6px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); }
+.recap-list { margin-bottom: 14px; }
+.recap-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; margin-bottom: 6px;
+  background: var(--bg-sunken); border-radius: var(--radius);
+  font-size: 14px; font-weight: 600;
+}
+.recap-row .ico { color: var(--accent); flex-shrink: 0; }
+.recap-note {
+  font-size: 12.5px; font-weight: 600; color: var(--text-faint);
+  line-height: 1.5; margin-bottom: 10px;
+}
+.toggle-opt { flex: none; padding: 9px 18px; }
+
+/* ---------- Tutorial ---------- */
+.tour-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 20px calc(24px + var(--safe-bottom));
+}
+.tour-skip {
+  position: absolute; top: calc(14px + var(--safe-top, 0px)); right: 16px;
+  border: none; background: transparent; color: var(--text-faint);
+  font-size: 14px; font-weight: 700; padding: 10px 12px; min-height: 44px;
+}
+.tour-card { width: 100%; max-width: 380px; text-align: center; }
+.tour-icon {
+  width: 62px; height: 62px; margin: 0 auto 20px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 20px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.tour-title { font-size: 25px; font-weight: 800; margin: 0 0 12px; letter-spacing: -0.02em; }
+.tour-body {
+  font-size: 15px; line-height: 1.6; color: var(--text-dim);
+  margin: 0 0 26px; font-weight: 500;
+}
+.tour-body strong { color: var(--text); font-weight: 800; }
+.tour-body em { color: var(--text); font-style: normal; font-weight: 700; }
+.tour-dots { display: flex; justify-content: center; gap: 7px; margin-bottom: 22px; }
+.tour-dot {
+  width: 6px; height: 6px; border-radius: 3px;
+  background: var(--border); transition: all .2s ease;
+}
+.tour-dot.on { width: 18px; background: var(--accent); }
+.tour-nav { display: flex; gap: 10px; align-items: center; }
+.tour-nav .primary-btn { margin: 0; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tour-nav .pill-btn { flex: none; }
+.tour-count { margin-top: 14px; font-size: 11.5px; font-weight: 700; color: var(--text-faint); }

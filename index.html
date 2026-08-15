@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=19">
+<link rel="stylesheet" href="css/style.css?v=20">
 </head>
 <body>
 
@@ -39,9 +39,20 @@
         <button id="todayNext" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
       </div>
 
+      <div id="carryRow" class="carry-row" hidden>
+        <button type="button" id="carryBtn" class="carry-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h15M13.5 5.5l6.5 6.5-6.5 6.5"/></svg><span>Bring unfinished tasks to today</span></button>
+      </div>
+
       <div id="inboxSection" class="inbox-section">
-        <div class="section-label">Inbox <span id="inboxCount" class="count-pill">0</span></div>
+        <div class="section-label inbox-label">
+          <span>Inbox <span id="inboxCount" class="count-pill">0</span></span>
+          <button type="button" id="focusBtn" class="focus-btn" aria-pressed="false" aria-label="Focus on three things"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg><span>Focus 3</span></button>
+        </div>
         <div id="inboxList" class="inbox-list"></div>
+        <div id="focusNote" class="focus-note" hidden></div>
+        <div id="somedayRow" class="someday-row-wrap" hidden>
+          <button type="button" id="somedayBtn" class="someday-btn">Someday</button>
+        </div>
       </div>
 
       <div id="checklistTodaySection" class="checklist-today-section" hidden>
@@ -110,6 +121,10 @@
     <section id="view-stats" class="view">
       <div class="stats-scroll">
         <div class="stat-cards" id="statCards"></div>
+        <p class="stats-encourage" id="statsEncourage"></p>
+        <div class="stat-block">
+          <button type="button" id="recapBtn" class="add-row-btn">See today, counted</button>
+        </div>
         <div class="stat-block">
           <div class="section-label">Last 14 days</div>
           <svg id="statsChart" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
@@ -117,6 +132,7 @@
         <div class="stat-block">
           <div class="section-label">Streaks</div>
           <div id="streakTable"></div>
+          <p class="settings-note" id="statsRate" style="text-align:left;margin:8px 0 0;"></p>
         </div>
         <div class="stat-block" id="practiceBlock" hidden>
           <div class="section-label">Practice records</div>
@@ -127,6 +143,19 @@
     </section>
 
   </main>
+
+  <!-- ===== Ambient time bar ===== -->
+  <div id="timeBar" class="time-bar" hidden>
+    <div class="tb-track"><div class="tb-fill" id="timeBarFill"></div></div>
+    <div class="tb-label" id="timeBarLabel"></div>
+  </div>
+
+  <!-- ===== Undo bar ===== -->
+  <div id="undoBar" class="undo-bar" hidden>
+    <span class="ub-label" id="undoBarLabel">Undo last change</span>
+    <button type="button" id="undoBarBtn" class="ub-btn">Undo</button>
+    <button type="button" id="undoBarClose" class="ub-close" aria-label="Dismiss"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
 
   <!-- ===== Quick Add (always visible) ===== -->
   <form id="quickAddForm" class="quick-add">
@@ -167,6 +196,12 @@
     <div class="sheet-row">
       <label>Duration</label>
       <button type="button" id="blockDurBtn" class="dur-picker-btn">30 min</button>
+    </div>
+    <p class="settings-note typical-note" id="blockTypicalNote" hidden></p>
+    <input id="blockStepInput" type="text" class="sheet-input step-input" placeholder="First physical step (open the laptop…)" maxlength="80">
+    <div class="start-actions">
+      <button type="button" id="blockStart5Btn" class="primary-btn start-now"><svg class="ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M7.5 4.8v14.4l12-7.2-12-7.2Z"/></svg><span>Just 5 minutes</span></button>
+      <button type="button" id="blockStartFullBtn" class="pill-btn">Full block</button>
     </div>
     </div>
     <div class="sheet-actions">
@@ -402,6 +437,71 @@
   </div>
 </div>
 
+<div id="taskRunOverlay" class="chore-run-overlay" hidden>
+  <div class="run-top">
+    <button id="taskRunCloseBtn" class="icon-btn" aria-label="Close"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    <div class="run-progress" id="taskRunName">Task</div>
+    <div class="run-spacer"></div>
+  </div>
+  <div class="run-body" id="taskRunBody">
+    <div class="task-run-step" id="taskRunStep" hidden></div>
+    <div class="chore-avg-line" id="taskRunAvg"></div>
+    <div class="run-timer-ring chore-ring">
+      <div class="chore-stopwatch-num" id="taskRunNum">5:00</div>
+    </div>
+    <div class="task-run-over" id="taskRunOver" hidden></div>
+    <div class="run-controls">
+      <button id="taskRunStopBtn" class="pill-btn">Stop</button>
+      <button id="taskRunKeepBtn" class="pill-btn">+5 min</button>
+      <button id="taskRunDoneBtn" class="pill-btn accent"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6.5 9.2 17.3 4 12.1"/></svg><span>Done</span></button>
+    </div>
+  </div>
+  <div class="run-done" id="taskRunNext" hidden>
+    <div class="run-done-check"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6.5 9.2 17.3 4 12.1"/></svg></div>
+    <div class="next-up-label">Next up</div>
+    <div class="run-done-title" id="taskRunNextTitle">Next</div>
+    <div class="run-done-time" id="taskRunNextCount">Starting in 10…</div>
+    <div class="run-controls">
+      <button id="taskRunNextSkipBtn" class="pill-btn">Not now</button>
+      <button id="taskRunNextGoBtn" class="pill-btn accent">Start now</button>
+    </div>
+  </div>
+</div>
+
+<div id="somedaySheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Someday</h2>
+    <p class="settings-note" style="text-align:left;margin:0 0 12px;">Tasks that sat untouched for three weeks step aside on their own, so the inbox stays something you can act on. Nothing is deleted.</p>
+    <div id="somedayList"></div>
+    <button id="somedayDoneBtn" class="primary-btn">Done</button>
+  </div>
+</div>
+
+<div id="recapSheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Today, counted</h2>
+    <div id="recapBody"></div>
+    <button id="recapDoneBtn" class="primary-btn">Good night</button>
+  </div>
+</div>
+
+<div id="tourOverlay" class="tour-overlay" hidden>
+  <button type="button" id="tourSkipBtn" class="tour-skip">Skip</button>
+  <div class="tour-card">
+    <div class="tour-icon" id="tourIcon"></div>
+    <h2 class="tour-title" id="tourTitle"></h2>
+    <p class="tour-body" id="tourBody"></p>
+    <div class="tour-dots" id="tourDots"></div>
+    <div class="tour-nav">
+      <button type="button" id="tourBackBtn" class="pill-btn" hidden>Back</button>
+      <button type="button" id="tourNextBtn" class="primary-btn tour-next">Next</button>
+    </div>
+    <div class="tour-count" id="tourCount"></div>
+  </div>
+</div>
+
 <div id="settingsSheet" class="sheet" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
@@ -414,6 +514,32 @@
       <button type="button" id="remindersToggleBtn" class="freq-opt" style="flex:none;padding:9px 18px;">Off</button>
     </div>
     <p class="settings-note" id="remindersNote" style="text-align:left;margin:2px 0 0;">Get notified when a time-blocked task starts, or when a routine's reminder time hits. Works best when DayFlow is installed to your Home Screen and open in the background.</p>
+    <div class="section-label" style="padding-left:0;margin-top:6px;">Focus &amp; flow</div>
+    <div class="sheet-row">
+      <label>Streak grace day</label>
+      <button type="button" id="graceToggle" class="freq-opt toggle-opt">On</button>
+    </div>
+    <div class="sheet-row">
+      <label>5-minute warnings</label>
+      <button type="button" id="transitionToggle" class="freq-opt toggle-opt">On</button>
+    </div>
+    <div class="sheet-row">
+      <label>Momentum queue</label>
+      <button type="button" id="momentumToggle" class="freq-opt toggle-opt">On</button>
+    </div>
+    <div class="sheet-row">
+      <label>Time bar</label>
+      <button type="button" id="timeBarToggle" class="freq-opt toggle-opt">On</button>
+    </div>
+    <div class="sheet-row">
+      <label>Park stale tasks</label>
+      <button type="button" id="decayToggle" class="freq-opt toggle-opt">On</button>
+    </div>
+    <p class="settings-note" style="text-align:left;margin:2px 0 0;">One missed day a week won't break a streak · you're warned 5 minutes before a block starts and ends · finishing one task offers the next · a bar shows time draining toward your next block · anything untouched for 3 weeks moves to Someday.</p>
+    <div class="sheet-actions">
+      <button id="openRecapBtn" class="pill-btn">Today's recap</button>
+      <button id="showTourBtn" class="pill-btn">Replay tutorial</button>
+    </div>
     <div class="sheet-row">
       <label>Appearance</label>
       <div class="freq-options" id="themeOptions">
@@ -450,6 +576,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="js/app.js?v=19"></script>
+<script src="js/app.js?v=20"></script>
 </body>
 </html>

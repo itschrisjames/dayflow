@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 const APP_BUILT = '2026-08-15';
 
 /* ======================= Storage ======================= */
@@ -39,7 +39,14 @@ const THEME_KEY = 'dayflow.theme';
 function loadState() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      // Merge over a blank state rather than trusting the stored object
+      // wholesale: a partial or truncated save used to leave whole collections
+      // undefined, which surfaces much later as an unexplained crash.
+      const parsed = JSON.parse(raw);
+      const base = blankState();
+      return Object.assign(base, parsed, { settings: Object.assign(base.settings, parsed.settings || {}) });
+    }
   } catch (e) { console.warn('load failed', e); }
   return blankState();
 }
@@ -64,6 +71,11 @@ function saveState(label) {
     undoStack.push({ snap, label: typeof label === 'string' ? label : '' });
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
     renderUndoBtn();
+    // A named action gets a visible, thumb-reachable undo for a while — the
+    // header button alone is too easy to miss right after a mis-tap.
+    if (typeof label === 'string' && label) {
+      try { showUndoBar(label); } catch (e) { /* bar not built yet during boot */ }
+    }
   }
 }
 
@@ -96,6 +108,7 @@ function undoLast() {
   renderUndoBtn();
   applyTheme();
   closeSheets();
+  try { hideUndoBar(); } catch (e) { /* not built yet */ }
   renderAll();
   toast(entry.label ? `Undid ${entry.label}` : 'Undone');
 }
@@ -213,6 +226,11 @@ const ICON_PATHS = {
   alarm: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="m4.5 3-2.2 2.2M19.5 3l2.2 2.2"/>',
   trophy: '<path d="M6.5 3.5h11v6.5a5.5 5.5 0 0 1-11 0V3.5Z"/><path d="M6.5 5.5h-2a2.5 2.5 0 0 0 2.5 2.5M17.5 5.5h2a2.5 2.5 0 0 1-2.5 2.5"/><path d="M9 20.5h6M12 16v4.5"/>',
   grip: '<circle cx="9" cy="6" r=".9"/><circle cx="15" cy="6" r=".9"/><circle cx="9" cy="12" r=".9"/><circle cx="15" cy="12" r=".9"/><circle cx="9" cy="18" r=".9"/><circle cx="15" cy="18" r=".9"/>',
+  bolt: '<path d="M13.2 2.5 4.5 13.5h6.3l-.9 8 8.7-11h-6.3l.9-8Z"/>',
+  crosshair: '<circle cx="12" cy="12" r="8.5"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/>',
+  moon: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/>',
+  undo: '<path d="M3.5 8.5h7v-7"/><path d="M3.9 14.2a8.5 8.5 0 1 0 1.4-6.4"/>',
+  arrowRight: '<path d="M4.5 12h15M13.5 5.5l6.5 6.5-6.5 6.5"/>',
 };
 
 function icon(name, size = 20, opts = {}) {
@@ -247,10 +265,22 @@ function blankState() {
   return {
     tasks: [], habits: [], routines: [], chores: [], lists: [],
     alarmStacks: [], chatLog: [], aiMemory: { facts: [] },
-    settings: { theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false },
+    taskTimes: {},
+    settings: {
+      theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false,
+      graceDays: true, transitionWarn: true, momentum: true, autoDecay: true,
+      timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
+    },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
 }
+
+/* Defaults for everything added after the first release. Kept in one table so a
+   migration is a single line rather than a scattered pile of `undefined` checks. */
+const SETTING_DEFAULTS = {
+  graceDays: true, transitionWarn: true, momentum: true, autoDecay: true,
+  timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
+};
 
 /* ======================= State ======================= */
 function ensureHabitSessions(s) {
@@ -279,6 +309,25 @@ function ensureNewCollections(s) {
   if (s.settings && !s.settings.alarmMethod) s.settings.alarmMethod = 'clock';
   // Existing installs seeded the day list as "Errands"; it's the To Do List now.
   (s.lists || []).forEach(l => { if (l.name === 'Errands') l.name = 'To Do List'; });
+
+  if (!s.taskTimes) s.taskTimes = {};
+  if (!s.settings) s.settings = {};
+  Object.keys(SETTING_DEFAULTS).forEach(k => {
+    if (s.settings[k] === undefined) s.settings[k] = SETTING_DEFAULTS[k];
+  });
+  // An existing install has already seen the app; only genuinely new installs
+  // get the tour, so nobody is re-onboarded by an update.
+  if (s.settings.tutorialSeen === false && (s.tasks || []).length + (s.habits || []).length > 0) {
+    s.settings.tutorialSeen = true;
+  }
+  // touchedAt drives the stale-task sweep; backfill it from creation time.
+  (s.tasks || []).forEach(t => {
+    // Anything that isn't a plausible millisecond timestamp (older data used
+    // small counters) is treated as "just touched" rather than three weeks
+    // stale — parking a task the user has never seen would be baffling.
+    if (!t.touchedAt || t.touchedAt < 1e12) t.touchedAt = (t.createdAt && t.createdAt > 1e12) ? t.createdAt : Date.now();
+    if (t.someday === undefined) t.someday = false;
+  });
 }
 
 let state = loadState();
@@ -402,22 +451,55 @@ function renderToday() {
 
   // Inbox: untimed tasks for this date, plus backlog (date null) shown only when viewing today
   const dayTasks = state.tasks.filter(t => t.date === ds);
-  const untimed = dayTasks.filter(t => t.startMin == null && !t.done);
-  const backlog = isToday ? state.tasks.filter(t => t.date === null && !t.done) : [];
-  const inboxTasks = [...untimed, ...backlog]
+  const untimed = dayTasks.filter(t => t.startMin == null && !t.done && !t.someday);
+  const backlog = isToday ? state.tasks.filter(t => t.date === null && !t.done && !t.someday) : [];
+  const allInbox = [...untimed, ...backlog]
     .sort((a, b) => (urgencyRank(a.urgency) - urgencyRank(b.urgency)) || (a.createdAt - b.createdAt));
+
+  // Focus mode is the overwhelm valve: three things, nothing else. A forty-item
+  // inbox is the thing that makes people close the app, not the work itself.
+  const focus = !!state.settings.focusMode;
+  const inboxTasks = focus ? allInbox.slice(0, 3) : allInbox;
+  const hiddenCount = allInbox.length - inboxTasks.length;
 
   const inboxList = document.getElementById('inboxList');
   inboxList.innerHTML = '';
   inboxTasks.forEach(t => inboxList.appendChild(renderInboxItem(t)));
-  document.getElementById('inboxCount').textContent = inboxTasks.length;
+  document.getElementById('inboxCount').textContent = allInbox.length;
+
+  const focusBtn = document.getElementById('focusBtn');
+  if (focusBtn) {
+    focusBtn.classList.toggle('active', focus);
+    focusBtn.setAttribute('aria-pressed', focus ? 'true' : 'false');
+  }
+  const focusNote = document.getElementById('focusNote');
+  if (focusNote) {
+    focusNote.hidden = !(focus && hiddenCount > 0);
+    focusNote.textContent = `${hiddenCount} more parked — they'll still be here`;
+  }
+
+  // Overdue leftovers: one tap beats re-dating them one at a time.
+  const carryRow = document.getElementById('carryRow');
+  if (carryRow) {
+    const over = isToday ? overdueTasks().length : 0;
+    carryRow.hidden = over === 0 || focus;
+    if (over) document.getElementById('carryBtn').textContent =
+      `Bring ${over} unfinished task${over === 1 ? '' : 's'} to today`;
+  }
+
+  const sdRow = document.getElementById('somedayRow');
+  if (sdRow) {
+    const n = somedayTasks().length;
+    sdRow.hidden = n === 0 || focus;
+    if (n) document.getElementById('somedayBtn').textContent = `Someday · ${n}`;
+  }
 
   // checklist-today (lists attached to this date)
   const attached = state.lists.filter(l => l.attachedDate === ds);
   const section = document.getElementById('checklistTodaySection');
   const wrap = document.getElementById('checklistTodayList');
   wrap.innerHTML = '';
-  if (attached.length === 0) {
+  if (attached.length === 0 || focus) {
     section.hidden = true;
   } else {
     section.hidden = false;
@@ -452,16 +534,29 @@ function renderToday() {
 
   renderScheduleToggle(ds);
   renderGrid(ds);
+  const schedToggle = document.getElementById('scheduleToggle');
+  if (schedToggle) schedToggle.hidden = focus;
+  if (focus) document.getElementById('gridScroll').hidden = true;
+  renderTimeBar();
 }
 
 function renderInboxItem(t) {
   const el = document.createElement('div');
   el.className = 'inbox-item';
   el.dataset.id = t.id;
+  // The play button is the most important control on this row: it starts a
+  // five-minute timer with zero decisions in between. Everything else on the
+  // row is organising, and organising is never the bottleneck.
   el.innerHTML = `
-    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : ''}${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : (t.urgency ? '' : '<span class="place-hint">tap to place</span>')}</div>
+    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : ''}${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : ''}<button type="button" class="start5-btn" aria-label="Start 5 minutes on ${escapeHtml(t.title)}">${icon('play', 13, { fill: true, strokeWidth: 0 })}<span>5m</span></button></div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}<span>Delete</span></button>
   `;
+  el.querySelector('.start5-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    // A swipe that happens to end over this button is a swipe, not a start.
+    if (el._wasDragged || el._swipeOpen) { el._wasDragged = false; return; }
+    startTaskTimer(t, START_SMALL_MIN);
+  });
   el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     deleteTaskById(t.id);
@@ -685,7 +780,7 @@ document.addEventListener('pointerdown', (e) => {
 function deleteTaskById(id) {
   closeAnyOpenSwipe();
   state.tasks = state.tasks.filter(x => x.id !== id);
-  saveState('delete');
+  saveState('deleting a task');
   renderAll();
   toast('Task deleted');
 }
@@ -865,8 +960,24 @@ function openBlockSheet(t, opts = {}) {
   document.getElementById('blockStartInput').value =
     t.startMin != null ? minToTimeInput(t.startMin)
     : (t.proposedMin != null ? minToTimeInput(t.proposedMin) : '');
-  currentDuration = t.durationMin || 30;
+  document.getElementById('blockStepInput').value = t.firstStep || '';
+
+  // Prefill from evidence. Once a task title has been timed, its real median
+  // beats whatever number was guessed the first time — unless the user has
+  // deliberately set a duration for this task, which always wins.
+  const typical = typicalMinutes(t.title);
+  currentDuration = t.durationSet ? (t.durationMin || 30) : (typical != null ? typical : (t.durationMin || 30));
   updateDurLabel();
+
+  const note = document.getElementById('blockTypicalNote');
+  if (note) {
+    const n = taskTimesCount(t.title);
+    note.hidden = typical == null;
+    if (typical != null) {
+      note.textContent = `Usually takes you about ${typical} min (${n} time${n === 1 ? '' : 's'} timed).`;
+    }
+  }
+
   currentUrgency = t.urgency || null;
   renderUrgencyOptions();
   document.getElementById('blockDoneBtn').textContent = t.done ? 'Mark not done' : 'Mark done';
@@ -928,6 +1039,7 @@ on('taskDurationSetBtn', 'click', () => {
   const h = taskHourCtrl ? taskHourCtrl.getValue() : 0;
   const m = taskMinCtrl ? taskMinCtrl.getValue() : 0;
   currentDuration = Math.max(5, h * 60 + m);
+  if (activeBlock) activeBlock.durationSet = true;   // a deliberate choice outranks the median
   updateDurLabel();
   const sheet = document.getElementById('taskDurationSheet');
   if (sheet) sheet.hidden = true;
@@ -947,9 +1059,32 @@ on('blockSaveBtn', 'click', () => {
   }
   activeBlock.durationMin = currentDuration;
   activeBlock.urgency = currentUrgency;
+  const step = document.getElementById('blockStepInput').value.trim();
+  if (step) activeBlock.firstStep = step; else delete activeBlock.firstStep;
+  touchTask(activeBlock);
   saveState();
   closeSheets();
   renderAll();
+});
+
+/* Two ways out of the sheet that both mean "begin now": a five-minute nibble,
+   or the full planned block. Either one starts immediately. */
+on('blockStart5Btn', 'click', () => {
+  if (!activeBlock) return;
+  const step = document.getElementById('blockStepInput').value.trim();
+  if (step) activeBlock.firstStep = step;
+  touchTask(activeBlock);
+  saveState('silent');
+  startTaskTimer(activeBlock, START_SMALL_MIN);
+});
+
+on('blockStartFullBtn', 'click', () => {
+  if (!activeBlock) return;
+  const step = document.getElementById('blockStepInput').value.trim();
+  if (step) activeBlock.firstStep = step;
+  touchTask(activeBlock);
+  saveState('silent');
+  startTaskTimer(activeBlock, currentDuration);
 });
 
 on('blockDoneBtn', 'click', () => {
@@ -971,10 +1106,390 @@ on('blockUnscheduleBtn', 'click', () => {
 on('blockDeleteBtn', 'click', () => {
   if (!activeBlock) return;
   state.tasks = state.tasks.filter(x => x.id !== activeBlock.id);
-  saveState();
+  saveState('deleting a task');
   closeSheets();
   renderAll();
 });
+
+/* ======================= How long things really take =======================
+   Estimating duration is the single worst-calibrated thing an ADHD brain is
+   asked to do, and a planner that only ever stores the guess never corrects it.
+   Every timed task writes its real elapsed time here, keyed by title, so the
+   next identical task can be pre-filled with evidence instead of optimism. */
+const TASK_TIME_CAP = 20;
+
+function taskKey(title) {
+  return (title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function recordTaskTime(title, seconds) {
+  const k = taskKey(title);
+  if (!k || seconds < 20) return;
+  if (!state.taskTimes) state.taskTimes = {};
+  const arr = state.taskTimes[k] || (state.taskTimes[k] = []);
+  arr.push(seconds);
+  if (arr.length > TASK_TIME_CAP) arr.shift();
+}
+
+/* Median, not mean: one afternoon where a task got abandoned mid-way shouldn't
+   permanently inflate every future estimate. */
+function medianTaskSec(title) {
+  const arr = (state.taskTimes || {})[taskKey(title)];
+  if (!arr || !arr.length) return null;
+  const s = arr.slice().sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+}
+
+function typicalMinutes(title) {
+  const sec = medianTaskSec(title);
+  if (sec == null) return null;
+  return Math.max(5, Math.round(sec / 60 / 5) * 5);
+}
+
+function taskTimesCount(title) {
+  const arr = (state.taskTimes || {})[taskKey(title)];
+  return arr ? arr.length : 0;
+}
+
+function touchTask(t) { if (t) t.touchedAt = Date.now(); }
+
+/* ======================= Task focus timer =======================
+   Starting is the hard part, not finishing. One tap gives a five-minute
+   countdown and nothing else to decide — no duration, no scheduling, no
+   category. Overtime is shown rather than punished, and the elapsed time is
+   recorded either way so the estimate gets better on its own. */
+const START_SMALL_MIN = 5;
+let taskRun = null;          // { task, goalSec, startTs, interval }
+let momentumTimer = null;
+
+function taskRunEl(id) { return document.getElementById(id); }
+
+function startTaskTimer(t, goalMin) {
+  if (!t) return;
+  clearInterval(taskRun && taskRun.interval);
+  clearInterval(momentumTimer);
+  const goalSec = Math.max(60, Math.round((goalMin || START_SMALL_MIN) * 60));
+  taskRun = { task: t, goalSec, startTs: Date.now(), interval: null };
+
+  taskRunEl('taskRunName').textContent = t.title;
+  const stepEl = taskRunEl('taskRunStep');
+  stepEl.textContent = t.firstStep ? t.firstStep : '';
+  stepEl.hidden = !t.firstStep;
+
+  const typical = typicalMinutes(t.title);
+  taskRunEl('taskRunAvg').innerHTML = typical != null
+    ? `Usually takes you <span class="avg-val">${typical} min</span>`
+    : `Just ${Math.round(goalSec / 60)} minutes. You can stop after that.`;
+
+  taskRunEl('taskRunNext').hidden = true;
+  taskRunEl('taskRunBody').hidden = false;
+  taskRunEl('taskRunOverlay').hidden = false;
+  taskRunTick();
+  taskRun.interval = setInterval(taskRunTick, 250);
+  closeSheets();
+}
+
+function taskRunTick() {
+  if (!taskRun) return;
+  const elapsed = Math.round((Date.now() - taskRun.startTs) / 1000);
+  const left = taskRun.goalSec - elapsed;
+  const num = taskRunEl('taskRunNum');
+  const over = taskRunEl('taskRunOver');
+  if (left >= 0) {
+    num.textContent = fmtMinSec(left);
+    num.classList.remove('overtime');
+    over.hidden = true;
+  } else {
+    num.textContent = fmtMinSec(elapsed);
+    num.classList.add('overtime');
+    over.hidden = false;
+    over.textContent = `${fmtMinSec(-left)} past ${Math.round(taskRun.goalSec / 60)} min — that's fine, it's just data`;
+  }
+}
+
+function endTaskRun(markDone) {
+  if (!taskRun) return null;
+  clearInterval(taskRun.interval);
+  const { task, goalSec } = taskRun;
+  const elapsed = Math.round((Date.now() - taskRun.startTs) / 1000);
+  taskRun = null;
+
+  recordTaskTime(task.title, elapsed);
+  touchTask(task);
+  if (markDone) task.done = true;
+  saveState(markDone ? 'finishing a task' : 'silent');
+
+  if (elapsed >= 20) {
+    const planned = task.durationMin || Math.round(goalSec / 60);
+    const actualMin = Math.max(1, Math.round(elapsed / 60));
+    // The estimate-vs-actual line is the whole point: seeing "you thought 15,
+    // it took 35" a few times does more for planning than any advice.
+    if (markDone && Math.abs(actualMin - planned) >= 5) {
+      toast(`Planned ${planned} min · took ${actualMin} min`, 4200);
+    } else if (markDone) {
+      toast(`Done in ${fmtMinSec(elapsed)}`);
+    } else {
+      toast(`${fmtMinSec(elapsed)} logged — progress counts`);
+    }
+  }
+  return { task, elapsed, markDone };
+}
+
+/* Momentum: the gap between finishing one thing and starting the next is where
+   an hour disappears. Offer the next task immediately, with an easy out. */
+function nextInboxTask(afterId) {
+  const ds = currentTodayDateStr();
+  return state.tasks
+    .filter(t => !t.done && !t.someday && t.id !== afterId && (t.date === ds || t.date === null))
+    .sort((a, b) => (urgencyRank(a.urgency) - urgencyRank(b.urgency)) || (a.createdAt - b.createdAt))[0] || null;
+}
+
+function offerMomentum(prevId) {
+  const next = state.settings.momentum ? nextInboxTask(prevId) : null;
+  if (!next) { closeTaskRun(); return; }
+  taskRunEl('taskRunBody').hidden = true;
+  taskRunEl('taskRunNext').hidden = false;
+  taskRunEl('taskRunNextTitle').textContent = next.title;
+  let n = 10;
+  const countEl = taskRunEl('taskRunNextCount');
+  countEl.textContent = `Starting in ${n}…`;
+  clearInterval(momentumTimer);
+  momentumTimer = setInterval(() => {
+    n--;
+    if (n <= 0) {
+      clearInterval(momentumTimer);
+      startTaskTimer(next, START_SMALL_MIN);
+    } else {
+      countEl.textContent = `Starting in ${n}…`;
+    }
+  }, 1000);
+  taskRunEl('taskRunNextGoBtn').onclick = () => { clearInterval(momentumTimer); startTaskTimer(next, START_SMALL_MIN); };
+  taskRunEl('taskRunNextSkipBtn').onclick = () => { clearInterval(momentumTimer); closeTaskRun(); renderAll(); };
+}
+
+function closeTaskRun() {
+  clearInterval(momentumTimer);
+  if (taskRun) clearInterval(taskRun.interval);
+  taskRun = null;
+  const ov = taskRunEl('taskRunOverlay');
+  if (ov) ov.hidden = true;
+  const nx = taskRunEl('taskRunNext');
+  if (nx) nx.hidden = true;
+  const bd = taskRunEl('taskRunBody');
+  if (bd) bd.hidden = false;
+}
+
+on('taskRunDoneBtn', 'click', () => {
+  const res = endTaskRun(true);
+  renderAll();
+  if (res) offerMomentum(res.task.id); else closeTaskRun();
+});
+on('taskRunKeepBtn', 'click', () => {
+  if (!taskRun) return;
+  taskRun.goalSec += 5 * 60;
+  taskRunTick();
+  toast('Five more minutes');
+});
+on('taskRunStopBtn', 'click', () => { endTaskRun(false); closeTaskRun(); renderAll(); });
+on('taskRunCloseBtn', 'click', () => { endTaskRun(false); closeTaskRun(); renderAll(); });
+
+/* ======================= Ambient time bar =======================
+   "You have 40 minutes" is a number; a bar that visibly empties is a feeling.
+   Time blindness responds to the second one. */
+function renderTimeBar() {
+  const bar = document.getElementById('timeBar');
+  if (!bar) return;
+  if (!state.settings.timeBar || state.view.current !== 'today') { bar.hidden = true; return; }
+
+  const ds = todayStr();
+  if (currentTodayDateStr() !== ds) { bar.hidden = true; return; }
+
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  const blocks = state.tasks
+    .filter(t => t.date === ds && t.startMin != null && !t.done)
+    .sort((a, b) => a.startMin - b.startMin);
+
+  const current = blocks.find(b => b.startMin <= nowMin && nowMin < b.startMin + (b.durationMin || 30));
+  const next = blocks.find(b => b.startMin > nowMin);
+
+  let pct = 0, label = '', tone = '';
+  if (current) {
+    const dur = current.durationMin || 30;
+    const left = Math.max(0, current.startMin + dur - nowMin);
+    pct = Math.min(1, (nowMin - current.startMin) / dur);
+    label = `${Math.ceil(left)} min left · ${current.title}`;
+    tone = left <= 5 ? 'urgent' : 'active';
+  } else if (next) {
+    const gapStart = blocks.filter(b => b.startMin + (b.durationMin || 30) <= nowMin)
+      .reduce((m, b) => Math.max(m, b.startMin + (b.durationMin || 30)), Math.max(0, nowMin - 120));
+    const span = Math.max(1, next.startMin - gapStart);
+    pct = Math.min(1, Math.max(0, (nowMin - gapStart) / span));
+    const until = Math.ceil(next.startMin - nowMin);
+    label = `${until} min until ${next.title}`;
+    tone = until <= 5 ? 'urgent' : '';
+  } else {
+    bar.hidden = true;
+    return;
+  }
+
+  bar.hidden = false;
+  bar.className = 'time-bar' + (tone ? ' ' + tone : '');
+  document.getElementById('timeBarFill').style.width = (pct * 100).toFixed(1) + '%';
+  document.getElementById('timeBarLabel').textContent = label;
+}
+
+/* ======================= Stale task decay =======================
+   An inbox nobody can triage becomes a source of guilt rather than a tool.
+   Anything untouched for three weeks steps aside on its own — still there,
+   just not in the way, and restorable in one tap. */
+const STALE_DAYS = 21;
+
+function sweepStaleTasks() {
+  if (!state.settings.autoDecay) return 0;
+  const cutoff = Date.now() - STALE_DAYS * 86400000;
+  let moved = 0;
+  state.tasks.forEach(t => {
+    if (t.done || t.someday || t.startMin != null) return;
+    if ((t.touchedAt || t.createdAt || 0) < cutoff) { t.someday = true; moved++; }
+  });
+  if (moved) saveState('silent');
+  return moved;
+}
+
+function somedayTasks() { return state.tasks.filter(t => t.someday && !t.done); }
+
+function renderSomedaySheet() {
+  const wrap = document.getElementById('somedayList');
+  if (!wrap) return;
+  const items = somedayTasks();
+  wrap.innerHTML = '';
+  if (!items.length) {
+    wrap.innerHTML = '<p class="settings-note" style="text-align:left;">Nothing here. Tasks land in Someday once they have sat untouched for three weeks.</p>';
+    return;
+  }
+  items.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'someday-row';
+    row.innerHTML = `<span class="sd-title">${escapeHtml(t.title)}</span>
+      <button type="button" class="pill-btn small" data-act="back">Bring back</button>
+      <button type="button" class="pill-btn small danger" data-act="del" aria-label="Delete">${icon('trash', 15)}</button>`;
+    row.querySelector('[data-act="back"]').addEventListener('click', () => {
+      t.someday = false;
+      t.date = currentTodayDateStr();
+      touchTask(t);
+      saveState('bringing a task back');
+      renderSomedaySheet();
+      renderAll();
+      toast('Back in your inbox');
+    });
+    row.querySelector('[data-act="del"]').addEventListener('click', () => {
+      state.tasks = state.tasks.filter(x => x.id !== t.id);
+      saveState('deleting a task');
+      renderSomedaySheet();
+      renderAll();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+function openSomeday() { renderSomedaySheet(); openSheet('somedaySheet'); }
+
+/* ======================= Carry forward =======================
+   Re-dating yesterday's leftovers one at a time is exactly the kind of
+   administrative tax that makes people abandon a planner. */
+function overdueTasks() {
+  const ds = todayStr();
+  return state.tasks.filter(t => !t.done && !t.someday && t.date && t.date < ds);
+}
+
+function carryForward() {
+  const items = overdueTasks();
+  if (!items.length) return;
+  const ds = currentTodayDateStr();
+  items.forEach(t => { t.date = ds; t.startMin = null; touchTask(t); });
+  saveState('carrying tasks forward');
+  renderAll();
+  toast(`${items.length} task${items.length === 1 ? '' : 's'} moved to today`);
+}
+
+/* ======================= Day recap =======================
+   ADHD memory badly under-credits the day; by evening the six things that got
+   done are invisible and only the undone ones are loud. This counts them. */
+function buildRecap(ds) {
+  const tasksDone = state.tasks.filter(t => t.done && t.date === ds);
+  const habitsDone = state.habits.filter(h => habitCount(h, ds) > 0)
+    .map(h => ({ name: h.name, n: habitCount(h, ds), target: habitTarget(h) }));
+  const practiceSec = state.habits.reduce((a, h) =>
+    a + (h.sessions || []).filter(s => s.date === ds).reduce((x, s) => x + s.seconds, 0), 0);
+  const left = state.tasks.filter(t => !t.done && !t.someday && t.date === ds).length;
+  return { tasksDone, habitsDone, practiceSec, left };
+}
+
+function openRecap() {
+  const ds = todayStr();
+  const r = buildRecap(ds);
+  const wrap = document.getElementById('recapBody');
+  const count = r.tasksDone.length + r.habitsDone.length;
+
+  let html = `<div class="recap-hero"><div class="rh-num">${count}</div><div class="rh-lbl">${count === 1 ? 'thing done today' : 'things done today'}</div></div>`;
+
+  if (r.tasksDone.length) {
+    html += '<div class="section-label" style="padding-left:0">Tasks</div><div class="recap-list">';
+    r.tasksDone.forEach(t => { html += `<div class="recap-row">${icon('check', 15, { strokeWidth: 2.4 })}<span>${escapeHtml(t.title)}</span></div>`; });
+    html += '</div>';
+  }
+  if (r.habitsDone.length) {
+    html += '<div class="section-label" style="padding-left:0">Habits</div><div class="recap-list">';
+    r.habitsDone.forEach(h => {
+      html += `<div class="recap-row">${icon('target', 15)}<span>${escapeHtml(h.name)}${h.target > 1 ? ` · ${h.n}/${h.target}` : ''}</span></div>`;
+    });
+    html += '</div>';
+  }
+  if (r.practiceSec > 0) {
+    html += `<div class="recap-note">${fmtMinSec(r.practiceSec)} of timed practice logged.</div>`;
+  }
+  if (!count) {
+    html = `<div class="recap-hero"><div class="rh-num">—</div><div class="rh-lbl">Quiet day. That happens, and tomorrow is untouched.</div></div>`;
+  }
+  if (r.left) {
+    html += `<div class="recap-note">${r.left} still open — they roll over, nothing is lost.</div>`;
+  }
+  wrap.innerHTML = html;
+  openSheet('recapSheet');
+}
+
+function maybeAutoRecap() {
+  if (state.settings.lastRecapDate === todayStr()) return;
+  const h = new Date().getHours();
+  if (h < 21) return;
+  const r = buildRecap(todayStr());
+  if (!r.tasksDone.length && !r.habitsDone.length) return;   // nothing to celebrate, don't nag
+  state.settings.lastRecapDate = todayStr();
+  saveState('silent');
+  openRecap();
+}
+
+/* ======================= Undo bar =======================
+   The little header button is easy to miss in the second after a mis-tap, so
+   an undoable action also parks a labelled bar within thumb reach. */
+let undoBarTimer = null;
+function showUndoBar(label) {
+  const bar = document.getElementById('undoBar');
+  if (!bar) return;
+  document.getElementById('undoBarLabel').textContent = label ? `Undo ${label}` : 'Undo last change';
+  bar.hidden = false;
+  clearTimeout(undoBarTimer);
+  undoBarTimer = setTimeout(() => { bar.hidden = true; }, 12000);
+}
+function hideUndoBar() {
+  const bar = document.getElementById('undoBar');
+  clearTimeout(undoBarTimer);
+  if (bar) bar.hidden = true;
+}
+on('undoBarBtn', 'click', () => { undoLast(); hideUndoBar(); });
+on('undoBarClose', 'click', hideUndoBar);
 
 /* ======================= Quick add ======================= */
 let quickAddMode = 'task'; // 'task' | 'habit'
@@ -996,6 +1511,59 @@ function setQuickAddMode(mode) {
 
 on('quickAddModeBtn', 'click', () => {
   setQuickAddMode(quickAddMode === 'task' ? 'habit' : 'task');
+});
+
+/* Thoughts arrive in bursts, not one at a time. Pasting or dictating a list
+   creates one task per line instead of a single unusable blob. */
+function splitLines(raw) {
+  return raw
+    .split(/[\r\n]+/)
+    .map(s => s.trim().replace(/^[-•*–]\s*/, '').replace(/^\d{1,2}[.)]\s+/, '').trim())
+    .filter(Boolean);
+}
+
+/* A text input silently strips newlines from its value, so a *typed* burst
+   can't arrive as lines — semicolons are the one separator people actually
+   reach for mid-flow. Pasting is handled separately, where the clipboard still
+   carries the real line breaks. */
+function splitTyped(raw) {
+  if (!raw.includes(';')) return [raw];
+  const parts = raw.split(';').map(s => s.trim()).filter(Boolean);
+  return parts.length >= 2 && parts.every(s => s.length >= 2) ? parts : [raw];
+}
+
+function addTasksBulk(lines) {
+  const dateForNew = state.view.current === 'today' ? currentTodayDateStr() : null;
+  lines.forEach(line => {
+    const parsed = extractTimeFromTitle(line);
+    state.tasks.push({
+      id: uid(),
+      title: parsed ? parsed.title : line,
+      date: parsed ? (dateForNew || todayStr()) : dateForNew,
+      startMin: null,
+      proposedMin: parsed ? parsed.startMin : undefined,
+      durationMin: typicalMinutes(parsed ? parsed.title : line) || 30,
+      done: false,
+      someday: false,
+      createdAt: Date.now(),
+      touchedAt: Date.now(),
+    });
+  });
+  saveState('adding tasks');
+  renderAll();
+  toast(`${lines.length} tasks captured`);
+}
+
+on('quickAddInput', 'paste', (e) => {
+  if (state.view.current === 'chat' || quickAddMode === 'habit') return;
+  const text = (e.clipboardData || window.clipboardData || {}).getData
+    ? (e.clipboardData || window.clipboardData).getData('text')
+    : '';
+  const lines = splitLines(text || '');
+  if (lines.length < 2) return;                 // a normal paste behaves normally
+  e.preventDefault();
+  document.getElementById('quickAddInput').value = '';
+  addTasksBulk(lines);
 });
 
 on('quickAddForm', 'submit', (e) => {
@@ -1020,6 +1588,13 @@ on('quickAddForm', 'submit', (e) => {
     return;
   }
 
+  const multi = title.includes('\n') ? splitLines(title) : splitTyped(title);
+  if (multi.length > 1) {
+    input.value = '';
+    addTasksBulk(multi);
+    return;
+  }
+
   const parsed = extractTimeFromTitle(title);
   const dateForNew = state.view.current === 'today' ? currentTodayDateStr() : null;
 
@@ -1027,7 +1602,8 @@ on('quickAddForm', 'submit', (e) => {
     // Capture stays capture: a stated time is remembered as a suggestion, but
     // the task still lands in the inbox so nothing is scheduled behind your back.
     state.tasks.push({ id: uid(), title: parsed.title, date: dateForNew || todayStr(),
-      startMin: null, proposedMin: parsed.startMin, durationMin: 30, done: false, createdAt: Date.now() });
+      startMin: null, proposedMin: parsed.startMin, durationMin: typicalMinutes(parsed.title) || 30,
+      done: false, someday: false, createdAt: Date.now(), touchedAt: Date.now() });
     input.value = '';
     saveState();
     renderAll();
@@ -1035,7 +1611,9 @@ on('quickAddForm', 'submit', (e) => {
     return;
   }
 
-  state.tasks.push({ id: uid(), title, date: dateForNew, startMin: null, durationMin: 30, done: false, createdAt: Date.now() });
+  state.tasks.push({ id: uid(), title, date: dateForNew, startMin: null,
+    durationMin: typicalMinutes(title) || 30, done: false, someday: false,
+    createdAt: Date.now(), touchedAt: Date.now() });
   input.value = '';
   saveState();
   renderAll();
@@ -1153,6 +1731,34 @@ function bumpHabit(h, ds, delta) {
   return next;
 }
 
+/* A forty-day streak wiped by one bad day is the moment people delete the app,
+   and the all-or-nothing framing is exactly backwards for ADHD: the miss was
+   never a choice. One free miss per rolling week keeps the streak alive without
+   making it meaningless — two misses in a week still ends it. */
+function graceEnabled() { return state.settings.graceDays !== false; }
+
+// How many of the last N days the habit was actually done. Shown next to the
+// streak so a miss cannot erase the evidence of everything else.
+function showedUpCount(h, days) {
+  let n = 0;
+  for (let i = 0; i < days; i++) if (habitDoneOn(h, dateStr(addDays(new Date(), -i)))) n++;
+  return n;
+}
+
+// True when the current streak is only alive because a grace day absorbed a miss.
+function streakUsedGrace(h) {
+  return h.freq.type === 'daily' && graceEnabled() && computeStreak(h) > computeStreakStrict(h);
+}
+
+function computeStreakStrict(h) {
+  if (h.freq.type !== 'daily') return computeStreak(h);
+  let streak = 0;
+  let d = new Date();
+  if (!habitDoneOn(h, todayStr())) d = addDays(d, -1);
+  while (habitDoneOn(h, dateStr(d))) { streak++; d = addDays(d, -1); }
+  return streak;
+}
+
 function computeStreak(h) {
   // current streak: consecutive qualifying periods up to today with completion
   let streak = 0;
@@ -1160,7 +1766,16 @@ function computeStreak(h) {
     let d = new Date();
     // if today not done yet, streak counts up to yesterday
     if (!habitDoneOn(h, todayStr())) d = addDays(d, -1);
-    while (habitDoneOn(h, dateStr(d))) { streak++; d = addDays(d, -1); }
+    let graceAt = null;          // how many days back the free miss was spent
+    for (let scanned = 0; scanned < 400; scanned++) {
+      if (habitDoneOn(h, dateStr(d))) { streak++; d = addDays(d, -1); continue; }
+      // A miss. Spend the week's grace on it if it is available, otherwise stop.
+      if (!graceEnabled()) break;
+      if (graceAt !== null && scanned - graceAt < 7) break;
+      if (streak === 0) break;   // nothing to protect yet
+      graceAt = scanned;
+      d = addDays(d, -1);
+    }
   } else {
     // weekly: count consecutive weeks meeting count threshold
     let weekStart = startOfWeek(new Date());
@@ -1216,6 +1831,15 @@ function habitSessionsInRange(h, days) {
   return (h.sessions || []).filter(s => s.date >= cutoff);
 }
 
+/* Effort is the honest headline number — "showed up 23 of the last 30 days"
+   survives a bad week in a way a reset streak counter never does. */
+function showedUpLine(h) {
+  const n = showedUpCount(h, 30);
+  if (!n) return 'No days logged yet — the first one is the whole trick.';
+  const grace = streakUsedGrace(h) ? ' · a grace day is holding your streak' : '';
+  return `Showed up <strong>${n}</strong> of the last 30 days${grace}`;
+}
+
 function renderHabits() {
   const list = document.getElementById('habitsList');
   list.innerHTML = '';
@@ -1242,6 +1866,7 @@ function renderHabits() {
         </div>
       </div>
       <div class="heatmap" data-id="${h.id}"></div>
+      <div class="habit-showed">${showedUpLine(h)}</div>
       ${h.timed && pr != null ? `<div class="habit-practice-meta">${icon('trophy', 13)} PR <span class="pr">${fmtMinSec(pr)}</span> · avg ${fmtMinSec(avg)} · total ${fmtMinSec(habitTotalPracticeSeconds(h))}</div>` : ''}
     `;
     const checkEl = card.querySelector('.habit-check');
@@ -1254,6 +1879,8 @@ function renderHabits() {
       nEl.textContent = computeStreak(h);
       nEl.classList.add('tick');
       setTimeout(() => nEl.classList.remove('tick'), 320);
+      const showed = card.querySelector('.habit-showed');
+      if (showed) showed.innerHTML = showedUpLine(h);
       renderHeatmap(card.querySelector('.heatmap'), h);
     };
 
@@ -1359,7 +1986,9 @@ function renderHeatmap(container, h) {
   const remaining = daysInMonth - todayDate;
   caption.innerHTML = `<span>${MON[month]} · ${hit}/${daysInMonth} days</span>` +
     (streak > 1
-      ? `<span class="chain">chain of ${streak} — don't break it</span>`
+      // Loss framing ("don't break it") turns a good run into something to be
+      // anxious about, which is the opposite of what keeps people going.
+      ? `<span class="chain">${streak} in a row</span>`
       : `<span class="chain quiet">${remaining} day${remaining === 1 ? '' : 's'} left this month</span>`);
   container.appendChild(caption);
 }
@@ -1467,14 +2096,45 @@ function renderStats() {
   const pct7 = pctFor(7), pct30 = pctFor(30);
 
   const bestStreak = state.habits.reduce((m, h) => Math.max(m, computeStreak(h)), 0);
-  const totalHabits = state.habits.length;
+
+  // Count what happened, not what didn't. A percentage is a grade; a tally of
+  // things finished is evidence, and evidence is what gets forgotten by evening.
+  const doneCount = (days) => {
+    let n = 0;
+    for (let i = 0; i < days; i++) {
+      const ds = dateStr(addDays(now, -i));
+      n += state.tasks.filter(t => t.date === ds && t.done).length;
+      n += state.habits.filter(h => habitDoneOn(h, ds)).length;
+    }
+    return n;
+  };
+  const wins7 = doneCount(7), wins30 = doneCount(30);
+  const activeDays = (() => {
+    let n = 0;
+    for (let i = 0; i < 30; i++) {
+      const ds = dateStr(addDays(now, -i));
+      if (state.tasks.some(t => t.date === ds && t.done) || state.habits.some(h => habitDoneOn(h, ds))) n++;
+    }
+    return n;
+  })();
 
   cards.innerHTML = `
-    <div class="stat-card"><div class="val">${pct7}%</div><div class="lbl">Tasks done, 7d</div></div>
-    <div class="stat-card"><div class="val">${pct30}%</div><div class="lbl">Tasks done, 30d</div></div>
+    <div class="stat-card"><div class="val">${wins7}</div><div class="lbl">Things done this week</div></div>
+    <div class="stat-card"><div class="val">${activeDays}</div><div class="lbl">Days you showed up, 30d</div></div>
     <div class="stat-card"><div class="val">${bestStreak}</div><div class="lbl">Best active streak</div></div>
-    <div class="stat-card"><div class="val">${totalHabits}</div><div class="lbl">Habits tracked</div></div>
+    <div class="stat-card"><div class="val">${wins30}</div><div class="lbl">Things done, 30d</div></div>
   `;
+
+  const line = document.getElementById('statsEncourage');
+  if (line) {
+    line.textContent = activeDays >= 20
+      ? `You've turned up on ${activeDays} of the last 30 days. That's the whole game.`
+      : activeDays > 0
+        ? `${wins30} thing${wins30 === 1 ? '' : 's'} finished across ${activeDays} day${activeDays === 1 ? '' : 's'}. None of that is nothing.`
+        : 'Nothing logged yet. Finish one thing and this page starts working for you.';
+  }
+  const rate = document.getElementById('statsRate');
+  if (rate) rate.textContent = `Of the tasks you dated, you finished ${pct7}% this week and ${pct30}% this month.`;
 
   // 14-day bar chart of completion counts
   const days = [];
@@ -1504,7 +2164,7 @@ function renderStats() {
   state.habits.forEach(h => {
     const row = document.createElement('div');
     row.className = 'streak-row';
-    row.innerHTML = `<span>${escapeHtml(h.name)}</span><span class="sv">current ${computeStreak(h)} · best ${computeLongestStreak(h)}</span>`;
+    row.innerHTML = `<span>${escapeHtml(h.name)}</span><span class="sv">${showedUpCount(h, 30)}/30 days · streak ${computeStreak(h)} · best ${computeLongestStreak(h)}</span>`;
     table.appendChild(row);
   });
 
@@ -3018,6 +3678,7 @@ function assistantFallback(raw) {
 on('settingsBtn', 'click', () => {
   applyTheme();
   renderRemindersToggle();
+  renderFlowToggles();
   const chip = document.getElementById('versionChip');
   if (chip) chip.textContent = APP_VERSION;
   const note = document.getElementById('versionNote');
@@ -3126,6 +3787,9 @@ function fireReminder(title, body) {
 }
 
 function checkReminders() {
+  // The evening recap isn't a notification, so it runs regardless of whether
+  // system reminders are switched on.
+  try { maybeAutoRecap(); } catch (e) { /* never let the recap break the tick */ }
   if (!state.settings.remindersEnabled) return;
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -3137,6 +3801,20 @@ function checkReminders() {
     if (t.startMin === nowMin && !notifiedTaskKeys.has(key)) {
       notifiedTaskKeys.add(key);
       fireReminder('Time to start', t.title);
+    }
+    // Being yanked out of something at the exact moment it is due never works;
+    // a five-minute runway does. Warn before the start, and before the end.
+    if (!state.settings.transitionWarn) return;
+    const warnKey = key + '_pre';
+    if (t.startMin - 5 === nowMin && !notifiedTaskKeys.has(warnKey)) {
+      notifiedTaskKeys.add(warnKey);
+      fireReminder('Start wrapping up', `${t.title} in 5 minutes`);
+    }
+    const endKey = key + '_end';
+    const endMin = t.startMin + (t.durationMin || 30);
+    if (endMin - 5 === nowMin && !notifiedTaskKeys.has(endKey)) {
+      notifiedTaskKeys.add(endKey);
+      fireReminder('5 minutes left', t.title);
     }
   });
 
@@ -3253,6 +3931,134 @@ on('resetBtn', 'click', () => {
   renderAll();
   toast('Everything erased');
 });
+
+/* ======================= Focus & flow controls ======================= */
+on('focusBtn', 'click', () => {
+  state.settings.focusMode = !state.settings.focusMode;
+  saveState('silent');
+  renderToday();
+  toast(state.settings.focusMode ? 'Three things. The rest can wait.' : 'Everything back');
+});
+
+on('carryBtn', 'click', carryForward);
+on('somedayBtn', 'click', openSomeday);
+on('somedayDoneBtn', 'click', closeSheets);
+on('recapBtn', 'click', openRecap);
+on('recapDoneBtn', 'click', closeSheets);
+on('openRecapBtn', 'click', () => { closeSheets(); openRecap(); });
+
+/* Toggle rows in Settings. Each one is a genuine preference — some people find
+   grace days a cop-out, some find the time bar stressful — so none of it is
+   forced, and everything defaults to the more forgiving option. */
+const FLOW_TOGGLES = [
+  ['graceToggle', 'graceDays'],
+  ['transitionToggle', 'transitionWarn'],
+  ['momentumToggle', 'momentum'],
+  ['timeBarToggle', 'timeBar'],
+  ['decayToggle', 'autoDecay'],
+];
+
+function renderFlowToggles() {
+  FLOW_TOGGLES.forEach(([id, key]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const val = state.settings[key] !== false;
+    btn.textContent = val ? 'On' : 'Off';
+    btn.classList.toggle('active', val);
+  });
+}
+
+FLOW_TOGGLES.forEach(([id, key]) => {
+  on(id, 'click', () => {
+    state.settings[key] = state.settings[key] === false;
+    saveState('silent');
+    renderFlowToggles();
+    renderAll();
+  });
+});
+
+/* ======================= Tutorial =======================
+   Seven cards, skippable from the first frame. It explains the two or three
+   ideas that make the app different and then gets out of the way — an
+   onboarding flow nobody can finish is worse than none at all. */
+const TOUR_SLIDES = [
+  {
+    icon: 'sparkle',
+    title: 'DayFlow',
+    body: 'A planner built around one rule: capturing something is always faster than organising it. Seven quick cards and you\'re done.',
+  },
+  {
+    icon: 'plus',
+    title: 'Get it out of your head',
+    body: 'Type or dictate into the bar at the bottom from anywhere in the app. Paste a whole list and each line becomes its own task. No fields, no categories, no decisions.',
+  },
+  {
+    icon: 'bolt',
+    title: 'Start before you\'re ready',
+    body: 'Every task has a 5m button. One tap starts a five-minute timer — no scheduling first. Add a "first step" like <em>open the laptop</em> and the starting line gets even lower.',
+  },
+  {
+    icon: 'timer',
+    title: 'See time instead of counting it',
+    body: 'A bar above the tab bar quietly empties as your next block approaches, and the schedule draws a line at the current moment. Timers keep running into overtime rather than shouting at you.',
+  },
+  {
+    icon: 'target',
+    title: 'Habits that forgive',
+    body: 'One missed day a week won\'t reset your streak, and every habit shows how many of the last 30 days you turned up. A bad Tuesday doesn\'t erase the month.',
+  },
+  {
+    icon: 'trophy',
+    title: 'The app learns your real pace',
+    body: 'Time a task, chore or practice session and DayFlow remembers how long it actually took, then pre-fills that next time. Estimates stop being wishful thinking.',
+  },
+  {
+    icon: 'crosshair',
+    title: 'When it\'s all too much',
+    body: 'Tap <strong>Focus</strong> on Today to hide everything but three things. Anything untouched for three weeks steps aside on its own. And undo is always one tap away.',
+  },
+];
+
+let tourIndex = 0;
+
+function renderTour() {
+  const s = TOUR_SLIDES[tourIndex];
+  document.getElementById('tourIcon').innerHTML = icon(s.icon, 30, { strokeWidth: 1.6 });
+  document.getElementById('tourTitle').textContent = s.title;
+  document.getElementById('tourBody').innerHTML = s.body;
+
+  const dots = document.getElementById('tourDots');
+  dots.innerHTML = TOUR_SLIDES.map((_, i) =>
+    `<span class="tour-dot${i === tourIndex ? ' on' : ''}"></span>`).join('');
+
+  document.getElementById('tourBackBtn').hidden = tourIndex === 0;
+  const last = tourIndex === TOUR_SLIDES.length - 1;
+  document.getElementById('tourNextBtn').innerHTML = last
+    ? 'Get started'
+    : `Next ${icon('arrowRight', 16, { strokeWidth: 2 })}`;
+  document.getElementById('tourCount').textContent = `${tourIndex + 1} of ${TOUR_SLIDES.length}`;
+}
+
+function openTour() {
+  tourIndex = 0;
+  renderTour();
+  document.getElementById('tourOverlay').hidden = false;
+}
+
+function closeTour() {
+  document.getElementById('tourOverlay').hidden = true;
+  state.settings.tutorialSeen = true;
+  saveState('silent');
+}
+
+on('tourNextBtn', 'click', () => {
+  if (tourIndex >= TOUR_SLIDES.length - 1) { closeTour(); toast('You\'re set. Add the first thing on your mind.', 3500); return; }
+  tourIndex++;
+  renderTour();
+});
+on('tourBackBtn', 'click', () => { if (tourIndex > 0) { tourIndex--; renderTour(); } });
+on('tourSkipBtn', 'click', () => { closeTour(); });
+on('showTourBtn', 'click', () => { closeSheets(); openTour(); });
 
 /* ======================= Sheets generic ======================= */
 /* Every sheet gets a real close affordance. Relying on a backdrop tap alone
@@ -3372,6 +4178,7 @@ function renderAll() {
   if (state.view.current === 'chores') renderChoresView();
   if (state.view.current === 'chat') renderChat();
   if (state.view.current === 'stats') renderStats();
+  if (state.view.current !== 'today') renderTimeBar();   // hides it off Today
 }
 
 /* Shortcuts returns here via x-callback-url, so a missing shortcut is reported
@@ -3398,7 +4205,19 @@ state.view.current = 'today';
 // because you are no longer looking at today.
 state.view.todayOffset = 0;
 state.view.weekOffset = 0;
+// Park anything that has been sitting untouched for weeks before the first
+// render, so the inbox you open is the one you can actually act on.
+const STALE_MOVED = sweepStaleTasks();
 switchView('today');
+if (STALE_MOVED) {
+  setTimeout(() => toast(`${STALE_MOVED} stale task${STALE_MOVED === 1 ? '' : 's'} moved to Someday — still there if you want them`, 5000), 900);
+}
+
+// First run gets the tour. Anything else — an update, a returning user — does
+// not, because being re-onboarded by an app you already use is infuriating.
+if (!state.settings.tutorialSeen && !ALARM_RESULT && !CAME_FROM_UPDATE) {
+  setTimeout(openTour, 350);
+}
 
 if (ALARM_RESULT === 'ok') {
   setTimeout(() => toast('Alarms set in Clock', 4000), 500);
@@ -3423,6 +4242,9 @@ if (CAME_FROM_UPDATE) {
   }, 700);
 }
 setInterval(() => { if (state.view.current === 'today') renderGrid(currentTodayDateStr()); }, 20000);
+// The time bar only means anything if it actually moves.
+setInterval(renderTimeBar, 15000);
+renderTimeBar();
 
 /* ======================= Service worker ======================= */
 if ('serviceWorker' in navigator) {
