@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 const APP_BUILT = '2026-08-15';
 
 /* ======================= Storage ======================= */
@@ -265,11 +265,13 @@ function blankState() {
   return {
     tasks: [], habits: [], routines: [], chores: [], lists: [],
     alarmStacks: [], chatLog: [], aiMemory: { facts: [] },
-    taskTimes: {},
+    taskTimes: {}, recurring: [],
     settings: {
       theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false,
       graceDays: true, transitionWarn: true, momentum: true, autoDecay: true,
       timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
+      pushOn: false, pushServer: null, pushKey: null,
+      lastExportAt: null, storagePersisted: null,
     },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
@@ -280,6 +282,8 @@ function blankState() {
 const SETTING_DEFAULTS = {
   graceDays: true, transitionWarn: true, momentum: true, autoDecay: true,
   timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
+  pushOn: false, pushServer: null, pushKey: null,
+  lastExportAt: null, storagePersisted: null,
 };
 
 /* ======================= State ======================= */
@@ -311,6 +315,11 @@ function ensureNewCollections(s) {
   (s.lists || []).forEach(l => { if (l.name === 'Errands') l.name = 'To Do List'; });
 
   if (!s.taskTimes) s.taskTimes = {};
+  if (!s.recurring) s.recurring = [];
+  (s.habits || []).forEach(h => { if (h.archived === undefined) h.archived = false; });
+  (s.chores || []).forEach(c => { if (c.archived === undefined) c.archived = false; });
+  (s.routines || []).forEach(r => { if (r.archived === undefined) r.archived = false; });
+  (s.tasks || []).forEach(t => { if (!Array.isArray(t.subtasks)) t.subtasks = []; });
   if (!s.settings) s.settings = {};
   Object.keys(SETTING_DEFAULTS).forEach(k => {
     if (s.settings[k] === undefined) s.settings[k] = SETTING_DEFAULTS[k];
@@ -534,10 +543,18 @@ function renderToday() {
 
   renderScheduleToggle(ds);
   renderGrid(ds);
+  renderBackupBanner();
   const schedToggle = document.getElementById('scheduleToggle');
   if (schedToggle) schedToggle.hidden = focus;
   if (focus) document.getElementById('gridScroll').hidden = true;
   renderTimeBar();
+}
+
+function subtaskChip(t) {
+  const n = (t.subtasks || []).length;
+  if (!n) return '';
+  const done = t.subtasks.filter(x => x.done).length;
+  return `<span class="subtask-chip${done === n ? ' complete' : ''}">${done}/${n}</span>`;
 }
 
 function renderInboxItem(t) {
@@ -548,7 +565,7 @@ function renderInboxItem(t) {
   // five-minute timer with zero decisions in between. Everything else on the
   // row is organising, and organising is never the bottleneck.
   el.innerHTML = `
-    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : ''}${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : ''}<button type="button" class="start5-btn" aria-label="Start 5 minutes on ${escapeHtml(t.title)}">${icon('play', 13, { fill: true, strokeWidth: 0 })}<span>5m</span></button></div>
+    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : ''}${subtaskChip(t)}${t.ruleId ? `<span class="repeat-dot" title="Repeats" aria-label="Repeating task">${icon('repeat', 12)}</span>` : ''}${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : ''}<button type="button" class="start5-btn" aria-label="Start 5 minutes on ${escapeHtml(t.title)}">${icon('play', 13, { fill: true, strokeWidth: 0 })}<span>5m</span></button></div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}<span>Delete</span></button>
   `;
   el.querySelector('.start5-btn').addEventListener('click', (e) => {
@@ -980,6 +997,12 @@ function openBlockSheet(t, opts = {}) {
 
   currentUrgency = t.urgency || null;
   renderUrgencyOptions();
+  currentEnergy = t.energy || null;
+  renderEnergyOptions();
+  currentSubtasks = (t.subtasks || []).map(st => ({ ...st }));
+  renderSubtaskEditor();
+  currentRepeat = (state.recurring.find(r => r.id === t.ruleId) || {}).kind || 'none';
+  renderRepeatOptions();
   document.getElementById('blockDoneBtn').textContent = t.done ? 'Mark not done' : 'Mark done';
   document.getElementById('blockUnscheduleBtn').style.display = t.startMin == null ? 'none' : 'flex';
   activeBlockOpts = opts;
@@ -1061,11 +1084,38 @@ on('blockSaveBtn', 'click', () => {
   activeBlock.urgency = currentUrgency;
   const step = document.getElementById('blockStepInput').value.trim();
   if (step) activeBlock.firstStep = step; else delete activeBlock.firstStep;
+  activeBlock.energy = currentEnergy;
+  activeBlock.subtasks = currentSubtasks;
+  upsertRuleFromTask(activeBlock, currentRepeat);
   touchTask(activeBlock);
   saveState();
   closeSheets();
   renderAll();
 });
+
+/* Repeat picker inside the task sheet. */
+let currentRepeat = 'none';
+function renderRepeatOptions() {
+  const wrap = document.getElementById('repeatOptions');
+  if (!wrap) return;
+  if (!wrap.childElementCount) {
+    REPEAT_KINDS.forEach(k => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'freq-opt repeat-opt';
+      btn.dataset.repeat = k.id;
+      btn.textContent = k.label;
+      btn.addEventListener('click', () => { currentRepeat = k.id; paintRepeatOptions(); });
+      wrap.appendChild(btn);
+    });
+  }
+  paintRepeatOptions();
+}
+function paintRepeatOptions() {
+  document.querySelectorAll('#repeatOptions .repeat-opt').forEach(el => {
+    el.classList.toggle('active', el.dataset.repeat === currentRepeat);
+  });
+}
 
 /* Two ways out of the sheet that both mean "begin now": a five-minute nibble,
    or the full planned block. Either one starts immediately. */
@@ -1843,9 +1893,10 @@ function showedUpLine(h) {
 function renderHabits() {
   const list = document.getElementById('habitsList');
   list.innerHTML = '';
-  document.getElementById('habitsCount').textContent = state.habits.length;
+  const live = state.habits.filter(h => !h.archived);
+  document.getElementById('habitsCount').textContent = live.length;
   const ds = todayStr();
-  state.habits.forEach(h => {
+  live.forEach(h => {
     const card = document.createElement('div');
     card.className = 'habit-card';
     const done = habitDoneOn(h, ds);
@@ -2069,12 +2120,16 @@ on('habitClearRecordsBtn', 'click', () => {
   toast('Records cleared for this habit');
 });
 
+/* Archive, not delete. A habit carries months of history that a stray tap
+   should not be able to destroy — the archive keeps all of it, and deleting
+   for good is available there once you've had a moment to think. */
 on('habitDeleteBtn', 'click', () => {
   if (!activeHabit) return;
-  state.habits = state.habits.filter(x => x.id !== activeHabit.id);
-  saveState('delete');
+  activeHabit.archived = true;
+  saveState('archiving a habit');
   closeSheets();
   renderAll();
+  toast('Archived — its history is kept in Settings › Archive', 4000);
 });
 
 /* ======================= Stats ======================= */
@@ -2297,7 +2352,8 @@ function routineTotalSeconds(r) { return r.steps.reduce((sum, s) => sum + s.seco
 function renderRoutinesView() {
   const wrap = document.getElementById('routinesContainer');
   wrap.innerHTML = '';
-  document.getElementById('routinesCount').textContent = state.routines.length;
+  const liveRoutines = state.routines.filter(r => !r.archived);
+  document.getElementById('routinesCount').textContent = liveRoutines.length;
 
   const alarmCard = document.createElement('div');
   alarmCard.className = 'routine-card';
@@ -2316,7 +2372,7 @@ function renderRoutinesView() {
   alarmCard.querySelector('[data-act="alarm"]').addEventListener('click', openAlarmSheet);
   wrap.appendChild(alarmCard);
 
-  state.routines.forEach(r => {
+  liveRoutines.forEach(r => {
     const card = document.createElement('div');
     card.className = 'routine-card';
     card.innerHTML = `
@@ -2485,15 +2541,24 @@ on('routineSaveBtn', 'click', () => {
 
 on('routineDeleteBtn', 'click', () => {
   if (!activeRoutine) return;
-  state.routines = state.routines.filter(x => x.id !== activeRoutine.id);
-  saveState('delete');
+  activeRoutine.archived = true;
+  saveState('archiving a routine');
   closeSheets();
   renderRoutinesView();
+  toast('Archived — restore it from Settings › Archive', 4000);
 });
 
 /* ---------- Routine run mode ---------- */
-let runRoutine = null, runIndex = 0, runRemaining = 0, runInterval = null, runPaused = false, runStartTime = 0;
+/* Timers are derived from wall-clock deadlines, never from counting interval
+   ticks. An interval stops firing the moment iOS suspends the page — lock the
+   screen mid-routine and a tick-counting timer silently freezes, so you come
+   back to a routine that thinks no time has passed. A deadline is still true
+   after a suspension, and catching up is just arithmetic. */
+let runRoutine = null, runIndex = 0, runRemaining = 0, runInterval = null;
+let runPaused = false, runStartTime = 0, runStepEndsAt = 0, runPausedLeft = 0;
 const RING_CIRC = 565.48;
+
+function stepSeconds(step) { return Math.max(1, (step && step.seconds) || 1); }
 
 function startRoutine(r) {
   runRoutine = r;
@@ -2510,7 +2575,16 @@ function loadRunStep() {
   runPaused = false;
   document.getElementById('runPauseBtn').textContent = 'Pause';
   const step = runRoutine.steps[runIndex];
-  runRemaining = step.seconds;
+  runStepEndsAt = Date.now() + stepSeconds(step) * 1000;
+  runRemaining = stepSeconds(step);
+  paintRunStep();
+  updateRunRing(stepSeconds(step));
+  runInterval = setInterval(runTick, 250);
+}
+
+// Labels only — split out so a catch-up can repaint without restarting a step.
+function paintRunStep() {
+  const step = runRoutine.steps[runIndex];
   document.getElementById('runStepTitle').textContent = step.text;
   document.getElementById('runProgress').textContent = `Step ${runIndex + 1} of ${runRoutine.steps.length}`;
   document.getElementById('runPrevBtn').disabled = runIndex === 0;
@@ -2518,8 +2592,6 @@ function loadRunStep() {
   const isLast = runIndex === runRoutine.steps.length - 1;
   document.getElementById('runNextBtn').textContent = isLast ? 'Finish ›' : 'Skip ›';
   renderRunDots();
-  updateRunRing(step.seconds);
-  runInterval = setInterval(runTick, 1000);
 }
 
 function renderRunDots() {
@@ -2533,19 +2605,30 @@ function renderRunDots() {
 }
 
 function updateRunRing(total) {
-  const frac = total > 0 ? runRemaining / total : 0;
+  const frac = total > 0 ? Math.max(0, runRemaining) / total : 0;
   document.getElementById('runRingFg').style.strokeDashoffset = RING_CIRC * (1 - frac);
-  document.getElementById('runTimerNum').textContent = fmtMinSec(runRemaining);
+  document.getElementById('runTimerNum').textContent = fmtMinSec(Math.max(0, runRemaining));
 }
 
 function runTick() {
-  runRemaining--;
-  const step = runRoutine.steps[runIndex];
-  updateRunRing(step.seconds);
-  if (runRemaining <= 0) {
-    clearInterval(runInterval);
-    advanceRunStep();
+  if (!runRoutine || runPaused) return;
+  let left = (runStepEndsAt - Date.now()) / 1000;
+  // Roll forward through however many steps elapsed while we weren't running,
+  // carrying the overflow, so a suspended phone resumes at the right place.
+  let skipped = 0;
+  while (left <= 0) {
+    if (runIndex >= runRoutine.steps.length - 1) { finishRun(); return; }
+    runIndex++;
+    skipped++;
+    runStepEndsAt += stepSeconds(runRoutine.steps[runIndex]) * 1000;
+    left = (runStepEndsAt - Date.now()) / 1000;
   }
+  if (skipped) {
+    paintRunStep();
+    if (skipped > 1) toast(`${skipped} steps ran while the screen was off`, 3000);
+  }
+  runRemaining = Math.ceil(left);
+  updateRunRing(stepSeconds(runRoutine.steps[runIndex]));
 }
 
 function advanceRunStep() {
@@ -2569,8 +2652,11 @@ function finishRun() {
 on('runPauseBtn', 'click', () => {
   runPaused = !runPaused;
   document.getElementById('runPauseBtn').textContent = runPaused ? 'Resume' : 'Pause';
-  if (runPaused) clearInterval(runInterval);
-  else runInterval = setInterval(runTick, 1000);
+  if (runPaused) {
+    runPausedLeft = Math.max(0, runStepEndsAt - Date.now());
+  } else {
+    runStepEndsAt = Date.now() + runPausedLeft;   // the deadline moves, not the clock
+  }
 });
 
 on('runPrevBtn', 'click', () => {
@@ -2582,10 +2668,26 @@ on('runNextBtn', 'click', () => {
 });
 on('runCloseBtn', 'click', () => {
   clearInterval(runInterval);
+  runRoutine = null;
   document.getElementById('routineRunOverlay').hidden = true;
 });
 on('runFinishBtn', 'click', () => {
+  runRoutine = null;
   document.getElementById('routineRunOverlay').hidden = true;
+});
+
+/* Coming back from a locked screen or another app: repaint every live timer
+   immediately rather than waiting up to a full tick for it to look right. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  try {
+    if (runRoutine) runTick();
+    if (typeof taskRun !== 'undefined' && taskRun) taskRunTick();
+    if (choreRunning) choreTick();
+    if (habitTimerRunning) habitTimerTick();
+    renderTimeBar();
+    checkReminders();
+  } catch (e) { console.warn('[DayFlow] resync failed', e); }
 });
 
 /* ======================= Chore timer ======================= */
@@ -2601,7 +2703,7 @@ function choreLast(c) { return c.sessions.length ? c.sessions[c.sessions.length 
 function renderChoresView() {
   const wrap = document.getElementById('choresContainer');
   wrap.innerHTML = '';
-  state.chores.forEach(c => {
+  state.chores.filter(c => !c.archived).forEach(c => {
     const avg = choreAverage(c);
     const last = choreLast(c);
     const card = document.createElement('div');
@@ -2618,9 +2720,10 @@ function renderChoresView() {
     `;
     card.querySelector('[data-act="start"]').addEventListener('click', () => startChoreTimer(c));
     card.querySelector('[data-act="del"]').addEventListener('click', () => {
-      state.chores = state.chores.filter(x => x.id !== c.id);
-      saveState();
+      c.archived = true;                       // keeps the timing history
+      saveState('archiving a chore');
       renderChoresView();
+      toast('Archived — your timings are kept', 3500);
     });
     wrap.appendChild(card);
   });
@@ -3394,6 +3497,62 @@ function assistantRespond(raw) {
     return `I couldn't find an open task matching "${needle}".`;
   }
 
+  // --- v21 intents ---
+  m = q.match(/^(?:find|search|where.*(?:is|are)|look for)\s+(.+)$/);
+  if (m) {
+    const needle = m[1].replace(/[?.]$/, '').trim();
+    const hits = searchEverything(needle);
+    if (!hits.length) return `Nothing matching "${needle}" anywhere — tasks, habits, routines, chores, lists or Someday.`;
+    return `**${hits.length} match${hits.length === 1 ? '' : 'es'} for "${needle}"**\n\n` +
+      hits.slice(0, 8).map(h => `· ${h.title} — ${h.sub}`).join('\n') +
+      (hits.length > 8 ? `\n\n…and ${hits.length - 8} more. The search button in the top bar shows all of them.` : '');
+  }
+
+  if (/(repeat|recurring|repeating)/.test(q)) {
+    if (!state.recurring.length) return `Nothing repeats yet. Open a task, set **Repeat**, and it'll rebuild itself on the days you pick.`;
+    return `**Repeating (${state.recurring.length})**\n\n` +
+      state.recurring.map(r => `· ${r.title} — ${repeatLabel(r)}${r.paused ? ' (paused)' : ''}`).join('\n');
+  }
+
+  if (/(backup|back up|export|lose my data|safe)/.test(q)) {
+    const d = daysSince(state.settings.lastExportAt);
+    const where = state.settings.storagePersisted === true ? ' Your browser has marked the data persistent, which helps but is not a guarantee.' : '';
+    return d === null
+      ? `You have never exported a backup. Everything lives in this browser's storage, so clearing website data would take all of it.${where}\n\nSettings › Export JSON writes a file you can keep somewhere else.`
+      : `Last backup was ${d === 0 ? 'today' : d + ' day' + (d === 1 ? '' : 's') + ' ago'}.${where}${d >= 7 ? '\n\nWorth doing another — Settings › Export JSON.' : ''}`;
+  }
+
+  if (/(notification|notify|remind me while|background|push)/.test(q)) {
+    return state.settings.pushOn
+      ? `Background reminders are on, sent by your own server. Alerts should reach you with DayFlow closed.`
+      : `Right now reminders only appear while DayFlow is open — iOS gives a web app no way to wake itself up, and a push needs a server to do the sending. Settings › Background reminders has the setup, and server/README.md in the repo has the code for it.`;
+  }
+
+  if (/(archive|archived|retired)/.test(q)) {
+    const n = archiveCounts();
+    return n ? `${n} archived item${n === 1 ? '' : 's'}, with all history intact. Settings › Archive restores any of them.`
+             : `Nothing archived. Archiving a habit or chore retires it without destroying its record — better than deleting when you might come back.`;
+  }
+
+  if (/(energy|tired|exhausted|can'?t focus|low effort|brain)/.test(q)) {
+    const want = energyForHour(new Date().getHours());
+    const pool = state.tasks.filter(t => !t.done && !t.someday && t.energy === want);
+    if (pool.length) return `For this time of day I'd look at ${energyLabel(want).toLowerCase()} work. You've tagged: ${pool.slice(0, 4).map(t => t.title).join(', ')}.`;
+    const any = state.tasks.filter(t => !t.done && !t.someday && t.energy);
+    return any.length
+      ? `Nothing tagged ${energyLabel(want).toLowerCase()} right now. Tagged elsewhere: ${any.slice(0, 4).map(t => `${t.title} (${energyLabel(t.energy).toLowerCase()})`).join(', ')}.`
+      : `You haven't tagged anything by effort yet. Open a task and set **Effort** — then I can stop suggesting deep work at midnight.`;
+  }
+
+  if (/(what did i (do|get done)|recap|today counted)/.test(q)) {
+    const r = buildRecap(todayStr());
+    const n = r.tasksDone.length + r.habitsDone.length;
+    if (!n) return `Nothing logged today yet. That's a fact, not a verdict.`;
+    return `**${n} thing${n === 1 ? '' : 's'} done today**\n\n` +
+      r.tasksDone.map(t => `· ${t.title}`).concat(r.habitsDone.map(h => `· ${h.name}`)).join('\n') +
+      (r.left ? `\n\n${r.left} still open — they roll over.` : '');
+  }
+
   if (/(what|show|any).*(asap|urgent)/.test(q)) {
     const asap = state.tasks.filter(t => !t.done && t.urgency === 'asap');
     if (!asap.length) return `Nothing flagged ASAP right now. Tap a task and pick "Do ASAP" if something needs to jump the queue.`;
@@ -3520,10 +3679,22 @@ function suggestNext(ds) {
     return out;
   }
 
-  const untimed = dayTasks.filter(t => t.startMin == null);
-  const undoneHabits = state.habits.filter(h => !habitDoneOn(h, todayStr()));
+  const untimed = dayTasks.filter(t => t.startMin == null && !t.someday);
+  const undoneHabits = state.habits.filter(h => !h.archived && !habitDoneOn(h, todayStr()));
   if (untimed.length) {
-    return `Nothing scheduled for the rest of today. Smallest thing in your inbox is **${untimed[0].title}** — start there, it's the lowest-friction one.`;
+    // Match the suggestion to the hour. Offering deep work at 11pm is how a
+    // task gets postponed for the twelfth time.
+    const want = energyForHour(new Date().getHours());
+    const fit = untimed.find(t => t.energy === want);
+    if (fit) {
+      const because = want === 'high' ? 'while your head is still fresh'
+        : want === 'medium' ? 'a decent middle-of-the-day one'
+        : 'and it barely needs any focus, which suits this hour';
+      return `Nothing scheduled for the rest of today. **${fit.title}** is tagged ${energyLabel(want).toLowerCase()} — ${because}.`;
+    }
+    const lowFirst = untimed.slice().sort((a, b) =>
+      ((a.durationMin || 30) - (b.durationMin || 30)))[0];
+    return `Nothing scheduled for the rest of today. Shortest thing in your inbox is **${lowFirst.title}** (${fmtDuration(lowFirst.durationMin || 30)}) — start there, it's the lowest-friction one.`;
   }
   if (undoneHabits.length) {
     return `Schedule's clear and the inbox is empty. Still open today: ${undoneHabits.map(h => h.name).join(', ')}. Pick whichever feels easiest right now.`;
@@ -3663,7 +3834,7 @@ function listReport(q) {
 }
 
 function assistantHelp() {
-  return `**Things I can do**\n\nAsk:\n· What's on today?\n· How am I doing this week?\n· What should I do next?\n· How long does washing dishes take?\n· Show my streaks / records\n· What do you know about me?\n\nTell:\n· add call the bank\n· add habit stretch\n· mark call the bank as asap\n· start morning routine\n· remember that I hate mornings\n\nI'm a simple matcher, not a chatbot with a language model — plain phrasing works best.`;
+  return `**Things I can do**\n\nAsk:\n· What's on today?\n· How am I doing this week?\n· What should I do next?\n· I'm tired, what can I do?\n· Find landlord\n· What did I get done today?\n· What repeats?\n· When did I last back up?\n· How long does washing dishes take?\n· Show my streaks / records\n· What do you know about me?\n\nTell:\n· add call the bank\n· add habit stretch\n· mark call the bank as asap\n· start morning routine\n· remember that I hate mornings\n\nI'm a pattern matcher running entirely on your phone, not a language model — plain phrasing works best, and nothing you type here leaves the device.`;
 }
 
 function assistantFallback(raw) {
@@ -3679,6 +3850,8 @@ on('settingsBtn', 'click', () => {
   applyTheme();
   renderRemindersToggle();
   renderFlowToggles();
+  renderPushRow();
+  renderBackupRow();
   const chip = document.getElementById('versionChip');
   if (chip) chip.textContent = APP_VERSION;
   const note = document.getElementById('versionNote');
@@ -3735,11 +3908,20 @@ document.querySelectorAll('#themeOptions .freq-opt').forEach(btn => {
 });
 
 /* ======================= Reminders / notifications ======================= */
-const notifiedTaskKeys = new Set();
+/* ======================= Reminders =======================
+   The old scheduler fired only on an exact minute match, which meant any
+   minute the page was suspended, throttled or simply not running was a minute
+   whose reminder never existed. Now the day's due times are computed as a
+   list and anything recently passed but undelivered still fires, so a phone
+   that was in a pocket for four minutes doesn't silently eat the alert.
 
+   Delivery keys are persisted, so a reload doesn't replay the last quarter
+   hour of reminders. They live outside the undo snapshot on purpose —
+   "already told you about this" isn't a user action to rewind. */
 function renderRemindersToggle() {
   const btn = document.getElementById('remindersToggleBtn');
   const note = document.getElementById('remindersNote');
+  if (!btn || !note) return;
   const supported = 'Notification' in window;
   if (!supported) {
     btn.textContent = 'Unsupported';
@@ -3753,7 +3935,7 @@ function renderRemindersToggle() {
   if (Notification.permission === 'denied') {
     note.textContent = 'Notifications are blocked for DayFlow in your browser/OS settings. Enable them there, then toggle this back on.';
   } else {
-    note.textContent = 'Get notified when a time-blocked task starts, or when a routine’s reminder time hits. Works best when DayFlow is installed to your Home Screen and open in the background.';
+    note.textContent = 'Alerts when a time-blocked task starts, five minutes before it starts and ends, and when a routine is due. These fire while DayFlow is open — see Background reminders below for alerts that arrive when it is closed.';
   }
 }
 
@@ -3766,14 +3948,14 @@ on('remindersToggleBtn', 'click', async () => {
     }
     if (perm === 'granted') {
       state.settings.remindersEnabled = true;
-      saveState();
+      saveState('silent');
       toast('Reminders on');
     } else {
       toast('Notification permission denied');
     }
   } else {
     state.settings.remindersEnabled = false;
-    saveState();
+    saveState('silent');
     toast('Reminders off');
   }
   renderRemindersToggle();
@@ -3786,63 +3968,295 @@ function fireReminder(title, body) {
   toast(body);
 }
 
+const NOTIFIED_KEY = 'dayflow.notified';
+const CATCHUP_MIN = 15;      // how stale a reminder may be and still be worth showing
+
+function loadNotified() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '{}');
+    if (raw.date === todayStr() && Array.isArray(raw.keys)) return new Set(raw.keys);
+  } catch (e) { /* corrupt or absent: start clean */ }
+  return new Set();
+}
+const notifiedTaskKeys = loadNotified();
+
+function persistNotified() {
+  try {
+    localStorage.setItem(NOTIFIED_KEY, JSON.stringify({ date: todayStr(), keys: [...notifiedTaskKeys] }));
+  } catch (e) { /* storage full: reminders simply repeat, which is survivable */ }
+}
+
+/* Everything that could be due today, as data. Building the list separately
+   from delivering it is what makes catch-up and testing possible at all. */
+function todayReminderEvents() {
+  const ds = todayStr();
+  const events = [];
+  const warn = state.settings.transitionWarn !== false;
+
+  state.tasks.forEach(t => {
+    if (t.date !== ds || t.startMin == null || t.done || t.someday) return;
+    events.push({ min: t.startMin, key: `${ds}_${t.id}`, title: 'Time to start', body: t.title });
+    if (!warn) return;
+    events.push({ min: t.startMin - 5, key: `${ds}_${t.id}_pre`, title: 'Start wrapping up', body: `${t.title} in 5 minutes` });
+    events.push({ min: t.startMin + (t.durationMin || 30) - 5, key: `${ds}_${t.id}_end`, title: '5 minutes left', body: t.title });
+  });
+
+  state.routines.forEach(r => {
+    if (!r.remindAt || r.archived) return;
+    events.push({ min: timeToMin(r.remindAt), key: `${ds}_rt_${r.id}`, title: 'Routine time', body: `Time for your “${r.name}” routine` });
+  });
+
+  state.alarmStacks.forEach(stack => {
+    [0, ALARM_GAP_MIN, ALARM_GAP_MIN * 2].forEach((off, i) => {
+      events.push({
+        min: (stack.startMin + off) % 1440,
+        key: `${ds}_${stack.id}_${i}`,
+        title: `${stack.label} (${i + 1}/3)`,
+        body: i === 2 ? 'Last call.' : 'Time to move.',
+      });
+    });
+  });
+
+  return events.filter(e => e.min >= 0 && e.min < 1440);
+}
+
 function checkReminders() {
   // The evening recap isn't a notification, so it runs regardless of whether
   // system reminders are switched on.
   try { maybeAutoRecap(); } catch (e) { /* never let the recap break the tick */ }
+  try { materialiseRecurring(); } catch (e) { console.warn('[DayFlow] recurring', e); }
   if (!state.settings.remindersEnabled) return;
+
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
-  const ds = todayStr();
+  let changed = false;
 
-  state.tasks.forEach(t => {
-    if (t.date !== ds || t.startMin == null || t.done) return;
-    const key = ds + '_' + t.id;
-    if (t.startMin === nowMin && !notifiedTaskKeys.has(key)) {
-      notifiedTaskKeys.add(key);
-      fireReminder('Time to start', t.title);
-    }
-    // Being yanked out of something at the exact moment it is due never works;
-    // a five-minute runway does. Warn before the start, and before the end.
-    if (!state.settings.transitionWarn) return;
-    const warnKey = key + '_pre';
-    if (t.startMin - 5 === nowMin && !notifiedTaskKeys.has(warnKey)) {
-      notifiedTaskKeys.add(warnKey);
-      fireReminder('Start wrapping up', `${t.title} in 5 minutes`);
-    }
-    const endKey = key + '_end';
-    const endMin = t.startMin + (t.durationMin || 30);
-    if (endMin - 5 === nowMin && !notifiedTaskKeys.has(endKey)) {
-      notifiedTaskKeys.add(endKey);
-      fireReminder('5 minutes left', t.title);
-    }
+  todayReminderEvents().forEach(ev => {
+    if (ev.min > nowMin || notifiedTaskKeys.has(ev.key)) return;
+    notifiedTaskKeys.add(ev.key);
+    changed = true;
+    // Anything older than the catch-up window is marked delivered but stays
+    // silent: being told at 4pm that something was due at 9am is just noise.
+    if (nowMin - ev.min <= CATCHUP_MIN) fireReminder(ev.title, ev.body);
   });
 
-  state.routines.forEach(r => {
-    if (!r.remindAt) return;
-    if (r.lastRemindedDate === ds) return;
-    if (timeToMin(r.remindAt) === nowMin) {
-      r.lastRemindedDate = ds;
-      saveState('silent');
-      fireReminder('Routine time', `Time for your “${r.name}” routine`);
-    }
-  });
-
-  // In-app echo of the alarm stacks (the .ics in Calendar is the real alarm).
-  state.alarmStacks.forEach(stack => {
-    [0, ALARM_GAP_MIN, ALARM_GAP_MIN * 2].forEach((off, i) => {
-      const min = (stack.startMin + off) % 1440;
-      const key = `${ds}_${stack.id}_${i}`;
-      if (min === nowMin && !notifiedTaskKeys.has(key)) {
-        notifiedTaskKeys.add(key);
-        fireReminder(`${stack.label} (${i + 1}/3)`, i === 2 ? 'Last call.' : 'Time to move.');
-      }
-    });
-  });
+  if (changed) persistNotified();
 }
 setInterval(checkReminders, 20000);
+// Run once at launch too. Waiting a full interval meant that opening the app
+// at the exact moment something was due showed nothing for twenty seconds.
+setTimeout(checkReminders, 600);
 
-on('exportBtn', 'click', () => {
+/* ======================= Push =======================
+   Everything below is the client half of real notifications: permission,
+   subscription, and handing the subscription somewhere. It works today only
+   as far as the browser — the piece that actually sends while DayFlow is shut
+   has to run on a server, and this app is otherwise entirely local. Rather
+   than pretend, the UI states plainly which half is live. See server/README.md
+   for the ~60 lines that complete it. */
+const PUSH_ENDPOINT_KEY = 'dayflow.pushEndpoint';
+
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+function pushConfigured() { return !!(state.settings.pushServer && state.settings.pushKey); }
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function subscribeToPush() {
+  if (!pushSupported()) { toast('This browser can’t do background notifications'); return false; }
+  if (!pushConfigured()) { openPushSetup(); return false; }
+  try {
+    let perm = Notification.permission;
+    if (perm === 'default') perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Notification permission denied'); return false; }
+
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    const sub = existing || await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(state.settings.pushKey),
+    });
+
+    const res = await fetch(state.settings.pushServer.replace(/\/$/, '') + '/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub, schedule: pushSchedulePayload() }),
+    });
+    if (!res.ok) throw new Error('server said ' + res.status);
+    localStorage.setItem(PUSH_ENDPOINT_KEY, sub.endpoint);
+    state.settings.pushOn = true;
+    saveState('silent');
+    toast('Background reminders on');
+    return true;
+  } catch (err) {
+    console.warn('[DayFlow] push subscribe failed', err);
+    toast('Couldn’t reach your reminder server — check the address in Settings', 5000);
+    return false;
+  }
+}
+
+async function unsubscribeFromPush() {
+  state.settings.pushOn = false;
+  saveState('silent');
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      if (pushConfigured()) {
+        fetch(state.settings.pushServer.replace(/\/$/, '') + '/unsubscribe', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        }).catch(() => {});
+      }
+      await sub.unsubscribe();
+    }
+  } catch (e) { /* already gone */ }
+  localStorage.removeItem(PUSH_ENDPOINT_KEY);
+  toast('Background reminders off');
+}
+
+/* What the server needs in order to fire without the app: the day's due times
+   in plain local minutes, refreshed whenever the schedule changes. */
+function pushSchedulePayload() {
+  return {
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
+    date: todayStr(),
+    events: todayReminderEvents().map(e => ({ min: e.min, title: e.title, body: e.body, key: e.key })),
+  };
+}
+
+async function syncPushSchedule() {
+  if (!state.settings.pushOn || !pushConfigured()) return;
+  const endpoint = localStorage.getItem(PUSH_ENDPOINT_KEY);
+  if (!endpoint) return;
+  try {
+    await fetch(state.settings.pushServer.replace(/\/$/, '') + '/schedule', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint, schedule: pushSchedulePayload() }),
+    });
+  } catch (e) { /* offline: the next sync will carry it */ }
+}
+
+function renderPushRow() {
+  const btn = document.getElementById('pushToggleBtn');
+  const note = document.getElementById('pushNote');
+  if (!btn || !note) return;
+  if (!pushSupported()) {
+    btn.textContent = 'Unsupported';
+    btn.disabled = true;
+    note.textContent = 'This browser has no Push API. On iPhone, add DayFlow to your Home Screen and open it from there — Safari tabs can’t receive background notifications.';
+    return;
+  }
+  const on = !!state.settings.pushOn;
+  btn.disabled = false;
+  btn.textContent = on ? 'On' : 'Off';
+  btn.classList.toggle('active', on);
+  note.textContent = pushConfigured()
+    ? (on ? `Reminders are sent by ${state.settings.pushServer} even when DayFlow is closed.`
+          : 'Switch on to receive reminders while DayFlow is shut.')
+    : 'Not set up yet. Reminders currently only appear while DayFlow is open — iOS gives a web app no way to wake itself. Tap Set up to point DayFlow at a small server that can send them (server/README.md in the repo has the code).';
+}
+
+on('pushToggleBtn', 'click', async () => {
+  if (state.settings.pushOn) { await unsubscribeFromPush(); }
+  else { await subscribeToPush(); }
+  renderPushRow();
+});
+
+function openPushSetup() {
+  document.getElementById('pushServerInput').value = state.settings.pushServer || '';
+  document.getElementById('pushKeyInput').value = state.settings.pushKey || '';
+  openSheet('pushSetupSheet');
+}
+on('pushSetupBtn', 'click', openPushSetup);
+on('pushSaveBtn', 'click', async () => {
+  const server = document.getElementById('pushServerInput').value.trim();
+  const key = document.getElementById('pushKeyInput').value.trim();
+  state.settings.pushServer = server || null;
+  state.settings.pushKey = key || null;
+  saveState('silent');
+  closeSheets();
+  renderPushRow();
+  if (server && key) await subscribeToPush();
+  renderPushRow();
+});
+
+/* ======================= Backup safety =======================
+   Everything lives in localStorage, which iOS will evict from a web app you
+   haven't opened in a while, and which one "Clear website data" wipes without
+   confirmation. A manual export button nobody remembers to press is not a
+   backup strategy, so the app asks for durable storage, keeps a second copy
+   under its own key, and says out loud how long it has been. */
+const BACKUP_KEY = 'dayflow.v1.bak';
+const BACKUP_NAG_DAYS = 7;
+
+async function requestPersistentStorage() {
+  try {
+    if (!navigator.storage || !navigator.storage.persist) return null;
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch (e) { return null; }
+}
+
+function writeLocalSnapshot() {
+  try {
+    localStorage.setItem(BACKUP_KEY, JSON.stringify({ at: Date.now(), state: JSON.parse(lastSnapshot || '{}') }));
+    return true;
+  } catch (e) { return false; }
+}
+
+function localSnapshotInfo() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BACKUP_KEY) || 'null');
+    if (!raw || !raw.state) return null;
+    return { at: raw.at, tasks: (raw.state.tasks || []).length, habits: (raw.state.habits || []).length };
+  } catch (e) { return null; }
+}
+
+function daysSince(ts) { return ts ? Math.floor((Date.now() - ts) / 86400000) : null; }
+
+function hasRealData() {
+  return state.tasks.length + state.habits.length + state.routines.length + state.chores.length > 0;
+}
+
+function renderBackupRow() {
+  const note = document.getElementById('backupNote');
+  if (!note) return;
+  const d = daysSince(state.settings.lastExportAt);
+  const snap = localSnapshotInfo();
+  const persisted = state.settings.storagePersisted;
+  const bits = [];
+  bits.push(d == null ? 'You have never exported a backup.'
+    : d === 0 ? 'Backed up today.'
+    : `Last backup ${d} day${d === 1 ? '' : 's'} ago.`);
+  if (snap) bits.push(`A local snapshot from ${daysSince(snap.at) === 0 ? 'today' : daysSince(snap.at) + ' days ago'} holds ${snap.tasks} tasks and ${snap.habits} habits.`);
+  bits.push(persisted === true
+    ? 'Your browser has marked this data as persistent.'
+    : 'Note that a local snapshot dies with the website data — an exported file is the only backup that survives clearing Safari.');
+  note.textContent = bits.join(' ');
+}
+
+function renderBackupBanner() {
+  const el = document.getElementById('backupBanner');
+  if (!el) return;
+  const d = daysSince(state.settings.lastExportAt);
+  const stale = hasRealData() && (d === null || d >= BACKUP_NAG_DAYS);
+  el.hidden = !stale || state.view.current !== 'today' || !!state.settings.focusMode;
+  if (stale) {
+    document.getElementById('backupBannerText').textContent = d === null
+      ? 'Your data has never been backed up'
+      : `Last backup was ${d} days ago`;
+  }
+}
+
+function exportBackup() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -3852,8 +4266,43 @@ on('exportBtn', 'click', () => {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  toast('Exported');
+  state.settings.lastExportAt = Date.now();
+  saveState('silent');
+  writeLocalSnapshot();
+  renderBackupRow();
+  renderBackupBanner();
+  toast('Exported — keep it somewhere that isn’t this phone');
+}
+
+on('backupBannerBtn', 'click', exportBackup);
+on('backupSnapshotBtn', 'click', () => {
+  toast(writeLocalSnapshot() ? 'Local snapshot saved' : 'Could not write a snapshot — storage may be full');
+  renderBackupRow();
 });
+on('backupRestoreBtn', 'click', () => {
+  const snap = localSnapshotInfo();
+  if (!snap) { toast('No local snapshot to restore'); return; }
+  const when = daysSince(snap.at) === 0 ? 'today' : `${daysSince(snap.at)} days ago`;
+  if (!confirm(`Restore the local snapshot from ${when}? It holds ${snap.tasks} tasks and ${snap.habits} habits, and will replace what is here now. This is undoable.`)) return;
+  try {
+    const raw = JSON.parse(localStorage.getItem(BACKUP_KEY));
+    const here = { ...state.view };
+    state = raw.state;
+    state.view = here;
+    ensureHabitSessions(state);
+    ensureNewCollections(state);
+    saveState('restoring a snapshot');
+    applyTheme();
+    closeSheets();
+    renderAll();
+    toast('Snapshot restored');
+  } catch (e) {
+    toast('That snapshot could not be read');
+  }
+});
+
+
+on('exportBtn', 'click', exportBackup);
 
 on('importFile', 'change', (e) => {
   const file = e.target.files[0];
@@ -3932,6 +4381,338 @@ on('resetBtn', 'click', () => {
   toast('Everything erased');
 });
 
+/* ======================= Recurring tasks =======================
+   Habits track whether you did a thing; they can't carry a time, a duration or
+   an inbox row, so "bins out on Tuesday" and "rent on the 1st" had nowhere to
+   live but your memory. A rule is stored once and materialises a perfectly
+   ordinary task on the days it applies — instances stay editable, deletable
+   and unaware they came from a rule. */
+const REPEAT_KINDS = [
+  { id: 'none', label: 'Never' },
+  { id: 'daily', label: 'Every day' },
+  { id: 'weekdays', label: 'Weekdays' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' },
+];
+
+function repeatLabel(rule) {
+  if (!rule || rule.kind === 'none') return 'Never';
+  if (rule.kind === 'daily') return 'Every day';
+  if (rule.kind === 'weekdays') return 'Mon–Fri';
+  if (rule.kind === 'weekly') return `Every ${WDFULL[rule.weekday != null ? rule.weekday : 1]}`;
+  if (rule.kind === 'monthly') return `Day ${rule.monthDay || 1} of each month`;
+  return 'Never';
+}
+
+function ruleAppliesOn(rule, d) {
+  if (!rule || rule.kind === 'none') return false;
+  const dow = d.getDay();
+  if (rule.kind === 'daily') return true;
+  if (rule.kind === 'weekdays') return dow >= 1 && dow <= 5;
+  if (rule.kind === 'weekly') return dow === (rule.weekday != null ? rule.weekday : 1);
+  if (rule.kind === 'monthly') {
+    const dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    // A rule for the 31st should still fire in February, on the last day.
+    return d.getDate() === Math.min(rule.monthDay || 1, dim);
+  }
+  return false;
+}
+
+// Only ever materialises today. Filling the calendar forward would create
+// hundreds of rows nobody asked for, and today is the only day that can be acted on.
+function materialiseRecurring() {
+  const d = new Date();
+  const ds = todayStr();
+  let made = 0;
+  (state.recurring || []).forEach(rule => {
+    if (rule.paused) return;
+    if (!ruleAppliesOn(rule, d)) return;
+    const exists = state.tasks.some(t => t.ruleId === rule.id && t.date === ds);
+    if (exists) return;
+    state.tasks.push({
+      id: uid(), title: rule.title, date: ds,
+      startMin: rule.startMin != null ? rule.startMin : null,
+      durationMin: rule.durationMin || 30,
+      urgency: rule.urgency || null,
+      energy: rule.energy || null,
+      firstStep: rule.firstStep || undefined,
+      subtasks: [], done: false, someday: false, ruleId: rule.id,
+      createdAt: Date.now(), touchedAt: Date.now(),
+    });
+    made++;
+  });
+  if (made) { saveState('silent'); renderAll(); }
+  return made;
+}
+
+function upsertRuleFromTask(t, kind) {
+  if (kind === 'none') {
+    if (t.ruleId) {
+      state.recurring = state.recurring.filter(r => r.id !== t.ruleId);
+      delete t.ruleId;
+    }
+    return null;
+  }
+  const base = {
+    title: t.title, startMin: t.startMin, durationMin: t.durationMin,
+    urgency: t.urgency || null, energy: t.energy || null, firstStep: t.firstStep || null,
+    kind, weekday: new Date().getDay(), monthDay: new Date().getDate(), paused: false,
+  };
+  const existing = state.recurring.find(r => r.id === t.ruleId);
+  if (existing) { Object.assign(existing, base); return existing; }
+  const rule = Object.assign({ id: uid(), createdAt: Date.now() }, base);
+  state.recurring.push(rule);
+  t.ruleId = rule.id;
+  return rule;
+}
+
+function renderRepeatSheet() {
+  const wrap = document.getElementById('repeatList');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!state.recurring.length) {
+    wrap.innerHTML = '<p class="settings-note" style="text-align:left;">Nothing repeats yet. Open any task, set <strong>Repeat</strong>, and it will appear here.</p>';
+    return;
+  }
+  state.recurring.forEach(rule => {
+    const row = document.createElement('div');
+    row.className = 'someday-row';
+    row.innerHTML = `<span class="sd-title">${escapeHtml(rule.title)}<span class="rule-sub">${repeatLabel(rule)}${rule.startMin != null ? ' · ' + minToLabel(rule.startMin) : ''}</span></span>
+      <button type="button" class="pill-btn small" data-act="pause">${rule.paused ? 'Resume' : 'Pause'}</button>
+      <button type="button" class="pill-btn small danger" data-act="del" aria-label="Delete rule">${icon('trash', 15)}</button>`;
+    row.querySelector('[data-act="pause"]').addEventListener('click', () => {
+      rule.paused = !rule.paused;
+      saveState(rule.paused ? 'pausing a repeat' : 'resuming a repeat');
+      renderRepeatSheet();
+    });
+    row.querySelector('[data-act="del"]').addEventListener('click', () => {
+      state.recurring = state.recurring.filter(r => r.id !== rule.id);
+      state.tasks.forEach(t => { if (t.ruleId === rule.id) delete t.ruleId; });
+      saveState('deleting a repeat');
+      renderRepeatSheet();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+on('repeatManageBtn', 'click', () => { closeSheets(); renderRepeatSheet(); openSheet('repeatSheet'); });
+on('repeatDoneBtn', 'click', closeSheets);
+
+/* ======================= Search =======================
+   Once there are a few hundred rows across seven tabs plus a Someday pile,
+   "where did I put that thing about the landlord" has no answer without this. */
+function searchEverything(q) {
+  const needle = q.toLowerCase().trim();
+  if (needle.length < 2) return [];
+  const hits = [];
+  const match = (s) => (s || '').toLowerCase().includes(needle);
+
+  state.tasks.forEach(t => {
+    if (!match(t.title) && !(t.subtasks || []).some(st => match(st.text))) return;
+    const where = t.someday ? 'Someday' : t.done ? 'Done' : t.startMin != null ? `Scheduled ${minToLabel(t.startMin)}` : 'Inbox';
+    hits.push({ kind: 'task', id: t.id, title: t.title, sub: `${where}${t.date ? ' · ' + t.date : ''}`, obj: t });
+  });
+  state.habits.forEach(h => { if (match(h.name)) hits.push({ kind: 'habit', id: h.id, title: h.name, sub: h.archived ? 'Habit · archived' : 'Habit', obj: h }); });
+  state.routines.forEach(r => {
+    const stepHit = (r.steps || []).find(s => match(s.text));
+    if (match(r.name) || stepHit) hits.push({ kind: 'routine', id: r.id, title: r.name, sub: stepHit ? `Routine · step “${stepHit.text}”` : 'Routine', obj: r });
+  });
+  state.chores.forEach(c => { if (match(c.name)) hits.push({ kind: 'chore', id: c.id, title: c.name, sub: 'Chore', obj: c }); });
+  state.lists.forEach(l => {
+    const itemHit = (l.items || []).find(i => match(i.text));
+    if (match(l.name) || itemHit) hits.push({ kind: 'list', id: l.id, title: l.name, sub: itemHit ? `List · “${itemHit.text}”` : 'List', obj: l });
+  });
+  state.recurring.forEach(r => { if (match(r.title)) hits.push({ kind: 'rule', id: r.id, title: r.title, sub: `Repeats · ${repeatLabel(r)}`, obj: r }); });
+  return hits.slice(0, 40);
+}
+
+function renderSearchResults() {
+  const q = document.getElementById('searchInput').value;
+  const wrap = document.getElementById('searchResults');
+  const hits = searchEverything(q);
+  wrap.innerHTML = '';
+  if (q.trim().length < 2) {
+    wrap.innerHTML = '<p class="settings-note" style="text-align:left;">Type at least two characters. Searches tasks, subtasks, habits, routines and their steps, chores, lists and repeats — including anything parked in Someday.</p>';
+    return;
+  }
+  if (!hits.length) {
+    wrap.innerHTML = `<p class="settings-note" style="text-align:left;">Nothing matches “${escapeHtml(q.trim())}”.</p>`;
+    return;
+  }
+  hits.forEach(hit => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'search-row';
+    row.innerHTML = `<span class="sr-title">${escapeHtml(hit.title)}</span><span class="sr-sub">${escapeHtml(hit.sub)}</span>`;
+    row.addEventListener('click', () => {
+      closeSheets();
+      if (hit.kind === 'task') {
+        if (hit.obj.date && hit.obj.date !== todayStr()) state.view.todayOffset = 0;
+        switchView('today');
+        setTimeout(() => openBlockSheet(hit.obj, { forceDate: currentTodayDateStr() }), 120);
+      } else if (hit.kind === 'habit') { switchView('habits'); setTimeout(() => openHabitSheet(hit.obj), 120); }
+      else if (hit.kind === 'routine') { switchView('routines'); }
+      else if (hit.kind === 'chore') { switchView('chores'); }
+      else if (hit.kind === 'list') { setTimeout(() => { renderListsSheet(); openSheet('listsSheet'); }, 120); }
+      else if (hit.kind === 'rule') { setTimeout(() => { renderRepeatSheet(); openSheet('repeatSheet'); }, 120); }
+    });
+    wrap.appendChild(row);
+  });
+}
+
+on('searchBtn', 'click', () => {
+  document.getElementById('searchInput').value = '';
+  renderSearchResults();
+  openSheet('searchSheet');
+  setTimeout(() => document.getElementById('searchInput').focus(), 250);
+});
+on('searchInput', 'input', renderSearchResults);
+on('searchForm', 'submit', (e) => { e.preventDefault(); renderSearchResults(); });
+
+/* ======================= Archive =======================
+   Deleting a habit used to destroy months of history along with it, which
+   makes "I'm done with this one for now" an expensive decision. Archiving
+   retires it and keeps every record. */
+function archiveCounts() {
+  return state.habits.filter(h => h.archived).length
+    + state.chores.filter(c => c.archived).length
+    + state.routines.filter(r => r.archived).length;
+}
+
+function renderArchiveSheet() {
+  const wrap = document.getElementById('archiveList');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const items = [
+    ...state.habits.filter(h => h.archived).map(o => ({ o, kind: 'habit', name: o.name, sub: `${Object.keys(o.completions || {}).length} days logged` })),
+    ...state.chores.filter(c => c.archived).map(o => ({ o, kind: 'chore', name: o.name, sub: `${(o.sessions || []).length} timed runs` })),
+    ...state.routines.filter(r => r.archived).map(o => ({ o, kind: 'routine', name: o.name, sub: `${(o.steps || []).length} steps` })),
+  ];
+  if (!items.length) {
+    wrap.innerHTML = '<p class="settings-note" style="text-align:left;">Nothing archived. Retiring a habit, chore or routine keeps all of its history — use it instead of deleting when you might come back.</p>';
+    return;
+  }
+  items.forEach(({ o, kind, name, sub }) => {
+    const row = document.createElement('div');
+    row.className = 'someday-row';
+    row.innerHTML = `<span class="sd-title">${escapeHtml(name)}<span class="rule-sub">${kind} · ${sub}</span></span>
+      <button type="button" class="pill-btn small" data-act="back">Restore</button>
+      <button type="button" class="pill-btn small danger" data-act="del" aria-label="Delete forever">${icon('trash', 15)}</button>`;
+    row.querySelector('[data-act="back"]').addEventListener('click', () => {
+      o.archived = false;
+      saveState('restoring from the archive');
+      renderArchiveSheet();
+      renderAll();
+      toast(`${name} is back`);
+    });
+    row.querySelector('[data-act="del"]').addEventListener('click', () => {
+      if (!confirm(`Delete ${name} and its history for good? The archive keeps it safely if you're unsure.`)) return;
+      if (kind === 'habit') state.habits = state.habits.filter(x => x.id !== o.id);
+      if (kind === 'chore') state.chores = state.chores.filter(x => x.id !== o.id);
+      if (kind === 'routine') state.routines = state.routines.filter(x => x.id !== o.id);
+      saveState('deleting from the archive');
+      renderArchiveSheet();
+      renderAll();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+on('archiveBtn', 'click', () => { closeSheets(); renderArchiveSheet(); openSheet('archiveSheet'); });
+on('archiveDoneBtn', 'click', closeSheets);
+
+/* ======================= Energy =======================
+   Not everything is equally doable at 9am and at 9pm, and pretending otherwise
+   is how a task gets moved eleven times. Tagging effort lets the suggestion
+   engine stop offering deep work at midnight. */
+const ENERGIES = [
+  { id: 'high', label: 'Needs focus' },
+  { id: 'medium', label: 'Normal' },
+  { id: 'low', label: 'Low effort' },
+];
+
+function energyForHour(h) {
+  if (h < 11) return 'high';
+  if (h < 16) return 'medium';
+  return 'low';
+}
+
+function energyLabel(id) {
+  const e = ENERGIES.find(x => x.id === id);
+  return e ? e.label : null;
+}
+
+let currentEnergy = null;
+function renderEnergyOptions() {
+  const wrap = document.getElementById('energyOptions');
+  if (!wrap) return;
+  if (!wrap.childElementCount) {
+    [...ENERGIES, { id: 'none', label: 'Unset' }].forEach(e => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'freq-opt energy-opt';
+      btn.dataset.energy = e.id;
+      btn.textContent = e.label;
+      btn.addEventListener('click', () => {
+        currentEnergy = (e.id === 'none' || currentEnergy === e.id) ? null : e.id;
+        paintEnergyOptions();
+      });
+      wrap.appendChild(btn);
+    });
+  }
+  paintEnergyOptions();
+}
+function paintEnergyOptions() {
+  document.querySelectorAll('#energyOptions .energy-opt').forEach(el => {
+    const id = el.dataset.energy;
+    el.classList.toggle('active', id === currentEnergy || (id === 'none' && !currentEnergy));
+  });
+}
+
+/* ======================= Subtasks =======================
+   "First step" lowered the starting line; this handles the tasks that are
+   genuinely three things wearing a trenchcoat, without forcing them to become
+   three separate inbox rows. */
+let currentSubtasks = [];
+
+function renderSubtaskEditor() {
+  const wrap = document.getElementById('subtaskList');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  currentSubtasks.forEach((st, i) => {
+    const row = document.createElement('div');
+    row.className = 'subtask-row';
+    row.innerHTML = `<div class="checkbox ${st.done ? 'checked' : ''}" role="checkbox" aria-checked="${st.done}" tabindex="0">${icon('check', 14, { strokeWidth: 2.6 })}</div>
+      <span class="st-text ${st.done ? 'done' : ''}">${escapeHtml(st.text)}</span>
+      <button type="button" class="st-del" aria-label="Remove step">${icon('x', 15)}</button>`;
+    const box = row.querySelector('.checkbox');
+    const toggle = () => {
+      st.done = !st.done;
+      box.classList.toggle('checked', st.done);
+      box.setAttribute('aria-checked', String(st.done));
+      row.querySelector('.st-text').classList.toggle('done', st.done);
+    };
+    box.addEventListener('click', toggle);
+    box.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } });
+    row.querySelector('.st-del').addEventListener('click', () => {
+      currentSubtasks.splice(i, 1);
+      renderSubtaskEditor();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+function addSubtaskFromInput() {
+  const input = document.getElementById('subtaskInput');
+  const text = input.value.trim();
+  if (!text) return;
+  currentSubtasks.push({ id: uid(), text, done: false });
+  input.value = '';
+  renderSubtaskEditor();
+}
+on('subtaskAddBtn', 'click', addSubtaskFromInput);
+on('subtaskInput', 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addSubtaskFromInput(); } });
+
 /* ======================= Focus & flow controls ======================= */
 on('focusBtn', 'click', () => {
   state.settings.focusMode = !state.settings.focusMode;
@@ -3990,7 +4771,7 @@ const TOUR_SLIDES = [
   {
     icon: 'plus',
     title: 'Get it out of your head',
-    body: 'Type or dictate into the bar at the bottom from anywhere in the app. Paste a whole list and each line becomes its own task. No fields, no categories, no decisions.',
+    body: 'Type or dictate into the bar at the bottom from anywhere in the app. Paste a whole list and each line becomes its own task. No fields, no categories, no decisions — the magnifier in the top bar finds anything again later.',
   },
   {
     icon: 'bolt',
@@ -4015,7 +4796,7 @@ const TOUR_SLIDES = [
   {
     icon: 'crosshair',
     title: 'When it\'s all too much',
-    body: 'Tap <strong>Focus</strong> on Today to hide everything but three things. Anything untouched for three weeks steps aside on its own. And undo is always one tap away.',
+    body: 'Tap <strong>Focus</strong> on Today to hide everything but three things. Anything untouched for three weeks steps aside on its own, undo is always one tap away, and DayFlow will nag you to export a backup — everything lives on this phone and nowhere else.',
   },
 ];
 
@@ -4143,11 +4924,24 @@ function makeSheetDismissible(sheet) {
   }, { passive: false });
 }
 
+const STACKING_SHEETS = new Set(['taskDurationSheet', 'durationPickerSheet']);
+
 function openSheet(id) {
   installSheetChrome();
   const backdrop = document.getElementById('overlayBackdrop');
   const sheet = document.getElementById(id);
   if (!sheet) { console.warn('[DayFlow] missing sheet:', id); return; }
+  // Only one sheet at a time. Opening a second one over the first left the
+  // old one still on top of the stack, so its rows swallowed taps meant for
+  // the new sheet — the classic "the button does nothing" bug.
+  //
+  // The wheel pickers are the exception: they are opened *by* a sheet and
+  // dismiss back to it, so they stack instead of replacing.
+  if (!STACKING_SHEETS.has(id)) {
+    document.querySelectorAll('.sheet').forEach(s => {
+      if (s !== sheet) { s.hidden = true; s.style.transform = ''; s.classList.remove('open'); }
+    });
+  }
   if (backdrop) backdrop.hidden = false;
   sheet.hidden = false;
   sheet.style.transform = '';
@@ -4208,7 +5002,25 @@ state.view.weekOffset = 0;
 // Park anything that has been sitting untouched for weeks before the first
 // render, so the inbox you open is the one you can actually act on.
 const STALE_MOVED = sweepStaleTasks();
+// Rebuild today's repeating tasks before the first paint, so they are simply
+// part of the day rather than something that pops in a moment later.
+materialiseRecurring();
 switchView('today');
+
+// Ask the browser to treat this data as worth keeping. iOS evicts storage from
+// web apps that go unopened, and this is the only lever a page has.
+requestPersistentStorage().then(res => {
+  if (res !== null && state.settings.storagePersisted !== res) {
+    state.settings.storagePersisted = res;
+    saveState('silent');
+  }
+});
+// A second copy under a different key survives a corrupt write, though not a
+// "clear website data" — which is exactly why the export nag exists too.
+setTimeout(writeLocalSnapshot, 4000);
+setInterval(writeLocalSnapshot, 30 * 60 * 1000);
+setInterval(syncPushSchedule, 15 * 60 * 1000);
+setTimeout(syncPushSchedule, 6000);
 if (STALE_MOVED) {
   setTimeout(() => toast(`${STALE_MOVED} stale task${STALE_MOVED === 1 ? '' : 's'} moved to Someday — still there if you want them`, 5000), 900);
 }

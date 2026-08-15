@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20">
+<link rel="stylesheet" href="css/style.css?v=21">
 </head>
 <body>
 
@@ -23,6 +23,7 @@
     <button id="listsBtn" class="icon-btn" aria-label="Lists"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg></button>
     <h1 id="viewTitle">Today</h1>
     <div class="topbar-right">
+      <button id="searchBtn" class="icon-btn" aria-label="Search everything"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg></button>
       <button id="undoBtn" class="icon-btn undo-btn" aria-label="Undo" hidden><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5h7v-7"/><path d="M3.9 14.2a8.5 8.5 0 1 0 1.4-6.4"/></svg></button>
       <button id="settingsBtn" class="icon-btn" aria-label="Settings"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M1.5 15h5M9.5 8h5M17.5 17h5"/></svg></button>
     </div>
@@ -34,9 +35,14 @@
     <!-- TODAY -->
     <section id="view-today" class="view active">
       <div class="day-nav">
-        <button id="todayPrev" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 18.5-6.5-6.5 6.5-6.5"/></svg></button>
+        <button id="todayPrev" class="chevron" aria-label="Previous day"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 18.5-6.5-6.5 6.5-6.5"/></svg></button>
         <div id="todayDateLabel" class="day-nav-label"></div>
-        <button id="todayNext" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
+        <button id="todayNext" class="chevron" aria-label="Next day"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
+      </div>
+
+      <div id="backupBanner" class="backup-banner" hidden>
+        <span id="backupBannerText">Your data has never been backed up</span>
+        <button type="button" id="backupBannerBtn" class="bb-btn">Export</button>
       </div>
 
       <div id="carryRow" class="carry-row" hidden>
@@ -78,9 +84,9 @@
     <!-- WEEK -->
     <section id="view-week" class="view">
       <div class="day-nav">
-        <button id="weekPrev" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 18.5-6.5-6.5 6.5-6.5"/></svg></button>
+        <button id="weekPrev" class="chevron" aria-label="Previous week"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 18.5-6.5-6.5 6.5-6.5"/></svg></button>
         <div id="weekRangeLabel" class="day-nav-label"></div>
-        <button id="weekNext" class="chevron"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
+        <button id="weekNext" class="chevron" aria-label="Next week"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
       </div>
       <div class="week-grid" id="weekGrid"></div>
     </section>
@@ -107,7 +113,7 @@
       <div id="choresContainer" class="view-pad"></div>
       <div class="list-add-row view-pad">
         <input type="text" id="newChoreInput" placeholder="Add a chore (e.g. Washing dishes)…" maxlength="60">
-        <button type="button" id="addChoreBtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button type="button" id="addChoreBtn" aria-label="Add chore"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       </div>
     </section>
 
@@ -181,28 +187,45 @@
 <!-- ===== Sheets / Overlays ===== -->
 <div id="overlayBackdrop" class="overlay-backdrop" hidden></div>
 
-<div id="blockSheet" class="sheet" hidden>
+<div id="blockSheet" class="sheet" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
-    <input id="blockTitleInput" type="text" class="sheet-input" maxlength="140">
+    <input id="blockTitleInput" type="text" class="sheet-input" maxlength="140" aria-label="Task title">
+    <p class="settings-note typical-note" id="blockTypicalNote" hidden></p>
+    <input id="blockStepInput" type="text" class="sheet-input step-input" placeholder="First physical step (open the laptop…)" maxlength="80" aria-label="First physical step">
+    <!-- Starting is the hard part, so it sits in the first screenful. Everything
+         below this line is organising, which can wait and usually should. -->
+    <div class="start-actions">
+      <button type="button" id="blockStart5Btn" class="primary-btn start-now"><svg class="ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M7.5 4.8v14.4l12-7.2-12-7.2Z"/></svg><span>Just 5 minutes</span></button>
+      <button type="button" id="blockStartFullBtn" class="pill-btn">Full block</button>
+    </div>
     <div class="sheet-row urgency-row">
       <label>When</label>
       <div class="urgency-options" id="urgencyOptions"></div>
     </div>
     <div class="sheet-row">
-      <label>Start</label>
+      <label for="blockStartInput">Start</label>
       <input id="blockStartInput" type="time" step="900">
     </div>
     <div class="sheet-row">
       <label>Duration</label>
       <button type="button" id="blockDurBtn" class="dur-picker-btn">30 min</button>
     </div>
-    <p class="settings-note typical-note" id="blockTypicalNote" hidden></p>
-    <input id="blockStepInput" type="text" class="sheet-input step-input" placeholder="First physical step (open the laptop…)" maxlength="80">
-    <div class="start-actions">
-      <button type="button" id="blockStart5Btn" class="primary-btn start-now"><svg class="ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M7.5 4.8v14.4l12-7.2-12-7.2Z"/></svg><span>Just 5 minutes</span></button>
-      <button type="button" id="blockStartFullBtn" class="pill-btn">Full block</button>
+    <div class="sheet-row freq-row">
+      <label>Effort</label>
+      <div class="freq-options" id="energyOptions"></div>
     </div>
+    <div class="sheet-row freq-row">
+      <label>Repeat</label>
+      <div class="freq-options repeat-options" id="repeatOptions"></div>
+    </div>
+    <div class="subtask-block">
+      <div class="section-label" style="padding-left:0">Steps</div>
+      <div id="subtaskList"></div>
+      <div class="step-add-row">
+        <input id="subtaskInput" type="text" placeholder="Break it into steps…" maxlength="80" aria-label="Add a step">
+        <button type="button" id="subtaskAddBtn" class="pill-btn accent small">Add</button>
+      </div>
     </div>
     <div class="sheet-actions">
       <button id="blockDoneBtn" class="pill-btn accent">Mark done</button>
@@ -213,7 +236,7 @@
   </div>
 </div>
 
-<div id="habitSheet" class="sheet" hidden>
+<div id="habitSheet" class="sheet" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <input id="habitNameInput" type="text" class="sheet-input" placeholder="Habit name" maxlength="60">
@@ -232,28 +255,28 @@
     <div class="sheet-row">
       <label>Times per day</label>
       <div class="stepper">
-        <button type="button" id="targetMinus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+        <button type="button" id="targetMinus" class="stepper-btn" aria-label="Fewer times per day"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
         <span id="targetLabel">1</span>
-        <button type="button" id="targetPlus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button type="button" id="targetPlus" class="stepper-btn" aria-label="More times per day"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       </div>
     </div>
     <div class="sheet-row" id="freqCountRow" hidden>
       <label>Times / week</label>
       <div class="stepper">
-        <button type="button" id="freqMinus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+        <button type="button" id="freqMinus" class="stepper-btn" aria-label="Fewer times per week"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
         <span id="freqCountLabel">3</span>
-        <button type="button" id="freqPlus" class="stepper-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button type="button" id="freqPlus" class="stepper-btn" aria-label="More times per week"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       </div>
     </div>
     <div class="sheet-actions">
       <button id="habitClearRecordsBtn" class="pill-btn" hidden>Clear records</button>
-      <button id="habitDeleteBtn" class="pill-btn danger" hidden>Delete</button>
+      <button id="habitDeleteBtn" class="pill-btn" hidden>Archive</button>
     </div>
     <button id="habitSaveBtn" class="primary-btn">Save</button>
   </div>
 </div>
 
-<div id="listsSheet" class="sheet sheet-tall" hidden>
+<div id="listsSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <div class="sheet-header-row">
@@ -264,7 +287,7 @@
   </div>
 </div>
 
-<div id="routineEditSheet" class="sheet sheet-tall" hidden>
+<div id="routineEditSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <input id="routineNameInput" type="text" class="sheet-input" placeholder="Routine name (e.g. Morning)" maxlength="60">
@@ -283,13 +306,13 @@
       <button type="button" id="addStepBtn" class="pill-btn accent small">Add</button>
     </div>
     <div class="sheet-actions">
-      <button id="routineDeleteBtn" class="pill-btn danger" hidden>Delete routine</button>
+      <button id="routineDeleteBtn" class="pill-btn" hidden>Archive routine</button>
     </div>
     <button id="routineSaveBtn" class="primary-btn">Save routine</button>
   </div>
 </div>
 
-<div id="alarmSheet" class="sheet sheet-tall" hidden>
+<div id="alarmSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <div class="sheet-header-row">
@@ -323,7 +346,7 @@
   </div>
 </div>
 
-<div id="alarmSetupSheet" class="sheet sheet-tall" hidden>
+<div id="alarmSetupSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <h2>Set up Clock alarms</h2>
@@ -341,7 +364,7 @@
   </div>
 </div>
 
-<div id="taskDurationSheet" class="sheet" hidden>
+<div id="taskDurationSheet" class="sheet" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <h2>How long?</h2>
@@ -356,7 +379,7 @@
   </div>
 </div>
 
-<div id="durationPickerSheet" class="sheet" hidden>
+<div id="durationPickerSheet" class="sheet" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <h2>Step duration</h2>
@@ -468,7 +491,7 @@
   </div>
 </div>
 
-<div id="somedaySheet" class="sheet sheet-tall" hidden>
+<div id="somedaySheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <h2>Someday</h2>
@@ -478,7 +501,7 @@
   </div>
 </div>
 
-<div id="recapSheet" class="sheet sheet-tall" hidden>
+<div id="recapSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <h2>Today, counted</h2>
@@ -502,7 +525,52 @@
   </div>
 </div>
 
-<div id="settingsSheet" class="sheet" hidden>
+<div id="searchSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Search</h2>
+    <form id="searchForm" class="search-form" autocomplete="off">
+      <input id="searchInput" type="search" class="sheet-input" placeholder="Search everything…" maxlength="60" aria-label="Search everything">
+    </form>
+    <div id="searchResults" role="list"></div>
+  </div>
+</div>
+
+<div id="repeatSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Repeating tasks</h2>
+    <p class="settings-note" style="text-align:left;margin:0 0 12px;">Each rule rebuilds its task on the days it applies. Instances behave like any other task — edit or delete one and the rule carries on.</p>
+    <div id="repeatList"></div>
+    <button id="repeatDoneBtn" class="primary-btn">Done</button>
+  </div>
+</div>
+
+<div id="archiveSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Archive</h2>
+    <p class="settings-note" style="text-align:left;margin:0 0 12px;">Retired habits, chores and routines, with every record intact.</p>
+    <div id="archiveList"></div>
+    <button id="archiveDoneBtn" class="primary-btn">Done</button>
+  </div>
+</div>
+
+<div id="pushSetupSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Background reminders</h2>
+    <p class="settings-note" style="text-align:left;margin:0 0 12px;">A web app can't wake itself on iOS, so an alert that arrives while DayFlow is closed has to be sent to it. That needs a small server — <strong>server/README.md</strong> in the DayFlow repo has the whole thing, about sixty lines, and it runs free on Render, Fly or a Raspberry Pi. Paste its address and public key here.</p>
+    <label class="field-label" for="pushServerInput">Server address</label>
+    <input id="pushServerInput" type="url" class="sheet-input" placeholder="https://dayflow-push.example.com" autocomplete="off">
+    <label class="field-label" for="pushKeyInput">VAPID public key</label>
+    <input id="pushKeyInput" type="text" class="sheet-input" placeholder="BEl62iUYgUiv…" autocomplete="off">
+    <p class="settings-note" style="text-align:left;">Until this is filled in, reminders still work — they just only appear while DayFlow is open.</p>
+    <button id="pushSaveBtn" class="primary-btn">Save and connect</button>
+  </div>
+</div>
+
+<div id="settingsSheet" class="sheet" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <div class="sheet-header-row title-with-chip">
@@ -514,6 +582,15 @@
       <button type="button" id="remindersToggleBtn" class="freq-opt" style="flex:none;padding:9px 18px;">Off</button>
     </div>
     <p class="settings-note" id="remindersNote" style="text-align:left;margin:2px 0 0;">Get notified when a time-blocked task starts, or when a routine's reminder time hits. Works best when DayFlow is installed to your Home Screen and open in the background.</p>
+    <div class="sheet-row">
+      <label>Background reminders</label>
+      <button type="button" id="pushToggleBtn" class="freq-opt toggle-opt">Off</button>
+    </div>
+    <p class="settings-note" id="pushNote" style="text-align:left;margin:2px 0 0;"></p>
+    <div class="sheet-actions">
+      <button id="pushSetupBtn" class="pill-btn">Set up push server</button>
+    </div>
+
     <div class="section-label" style="padding-left:0;margin-top:6px;">Focus &amp; flow</div>
     <div class="sheet-row">
       <label>Streak grace day</label>
@@ -552,10 +629,20 @@
       <label>Accent color</label>
       <div class="color-swatches" id="colorSwatches"></div>
     </div>
+    <div class="section-label" style="padding-left:0;margin-top:6px;">Your data</div>
     <div class="sheet-actions">
       <button id="exportBtn" class="pill-btn accent">Export JSON</button>
       <label class="pill-btn" for="importFile">Import JSON</label>
       <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+    <div class="sheet-actions">
+      <button id="backupSnapshotBtn" class="pill-btn">Save local snapshot</button>
+      <button id="backupRestoreBtn" class="pill-btn">Restore snapshot</button>
+    </div>
+    <p class="settings-note" id="backupNote" style="text-align:left;margin:2px 0 0;"></p>
+    <div class="sheet-actions">
+      <button id="repeatManageBtn" class="pill-btn">Repeating tasks</button>
+      <button id="archiveBtn" class="pill-btn">Archive</button>
     </div>
     <div class="sheet-actions">
       <button id="clearPracticeBtn" class="pill-btn danger">Clear practice records</button>
@@ -574,8 +661,8 @@
   </div>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/app.js?v=20"></script>
+<script src="js/app.js?v=21"></script>
 </body>
 </html>
