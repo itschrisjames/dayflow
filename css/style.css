@@ -1245,3 +1245,48 @@ button { font-family: inherit; }
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+/* ---------- Calendar sync ---------- */
+.cal-block {
+  background: var(--bg-sunken); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.cal-head .cal-name { font-size: 15px; font-weight: 800; }
+.cal-block .sheet-row { border-top-color: color-mix(in srgb, var(--text) 8%, transparent); }
+.cal-block .sheet-actions { margin: 10px 0 0; }
+
+/* An imported event is a fact about your day, not a task: flat, quiet, and
+   visibly not something you can drag around. */
+.block.external { box-shadow: none; }
+/* The tint lives on .swipe-content, so that is what has to change — an
+   imported event should read as scenery, not as one of your blocks. */
+.block.external .swipe-content {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--text) 8%, var(--bg-elev)) 0 7px,
+    color-mix(in srgb, var(--text) 4%, var(--bg-elev)) 7px 14px);
+  border-left: 3px solid color-mix(in srgb, var(--text) 34%, transparent);
+  color: var(--text-dim);
+}
+.block.external .block-title { font-weight: 700; display: flex; align-items: center; gap: 4px; }
+.block.external .block-title .ico { opacity: .7; flex-shrink: 0; }
+.block.external .block-time { opacity: .75; }
+
+/* ---------- Manual practice log ---------- */
+.session-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin-bottom: 6px;
+  background: var(--bg-sunken); border-radius: 10px;
+}
+.session-row .sess-date { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; }
+.session-row .sess-dur {
+  font-size: 13.5px; font-weight: 800; color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A swiped-open row hands the tap to Delete, not to the start button riding
+   over it. */
+.inbox-item.swiped .start5-btn,
+.inbox-item.swiped .time-chip { pointer-events: none; }
+.pill-btn:disabled, .freq-opt:disabled { opacity: .42; }

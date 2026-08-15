@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 const APP_BUILT = '2026-08-15';
 
 /* ======================= Storage ======================= */
@@ -265,7 +265,7 @@ function blankState() {
   return {
     tasks: [], habits: [], routines: [], chores: [], lists: [],
     alarmStacks: [], chatLog: [], aiMemory: { facts: [] },
-    taskTimes: {}, recurring: [],
+    taskTimes: {}, recurring: [], calendar: null,
     settings: {
       theme: 'auto', remindersEnabled: false, colorScheme: 'orange', showSchedule: false,
       graceDays: true, transitionWarn: true, momentum: true, autoDecay: true,
@@ -316,6 +316,7 @@ function ensureNewCollections(s) {
 
   if (!s.taskTimes) s.taskTimes = {};
   if (!s.recurring) s.recurring = [];
+  if (!s.calendar) s.calendar = null;
   (s.habits || []).forEach(h => { if (h.archived === undefined) h.archived = false; });
   (s.chores || []).forEach(c => { if (c.archived === undefined) c.archived = false; });
   (s.routines || []).forEach(r => { if (r.archived === undefined) r.archived = false; });
@@ -750,12 +751,26 @@ function renderGrid(ds) {
 
 function renderBlock(t) {
   const el = document.createElement('div');
-  el.className = 'block' + (t.done ? ' done' : '');
+  const ext = !!t.external;
+  el.className = 'block' + (t.done ? ' done' : '') + (ext ? ' external' : '');
   el.dataset.id = t.id;
   const top = (t.startMin - GRID_START_MIN) * PX_PER_MIN;
   const height = Math.max(22, t.durationMin * PX_PER_MIN);
   el.style.top = top + 'px';
   el.style.height = height + 'px';
+
+  // An event pulled from Google or Apple is somebody else's fact about your
+  // day. It shows on the grid so the time is visibly taken, but it is not
+  // draggable, deletable or editable here — that would silently diverge from
+  // the calendar it came from.
+  if (ext) {
+    el.innerHTML = `<div class="swipe-content"><div class="block-title">${icon('calendar', 11)} ${escapeHtml(t.title)}</div><div class="block-time">${minToLabel(t.startMin)} · ${t.external.source === 'google' ? 'Google' : 'Calendar'}</div></div>`;
+    el.addEventListener('click', () => {
+      toast(`“${t.title}” comes from your ${t.external.source === 'google' ? 'Google' : 'Apple'} calendar — edit it there`, 3500);
+    });
+    return el;
+  }
+
   el.innerHTML = `
     <div class="swipe-content"><div class="block-title">${escapeHtml(t.title)}</div><div class="block-time">${minToLabel(t.startMin)} · ${t.durationMin}m</div></div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}</button>
@@ -779,12 +794,18 @@ function closeSwipeRowObj(row) {
   row.content.style.transition = '';
   row.content.style.transform = '';
   row.el._swipeOpen = false;
+  row.el.classList.remove('swiped');
 }
 function openSwipeRowObj(el, content, width) {
   if (openSwipeRow && openSwipeRow.el !== el) closeSwipeRowObj(openSwipeRow);
   content.style.transition = '';
   content.style.transform = `translateX(-${width}px)`;
   el._swipeOpen = true;
+  // The revealed Delete button sits under the row content, and the 5m start
+  // button rides right over it once the row slides across — so a tap aimed at
+  // Delete would hit Start instead. Take the start button out of the running
+  // for as long as the row is open.
+  el.classList.add('swiped');
   openSwipeRow = { el, content };
 }
 function closeAnyOpenSwipe() {
@@ -1510,10 +1531,26 @@ function openRecap() {
   openSheet('recapSheet');
 }
 
+/* The recap is a nice moment, not an interruption. It waits for a natural
+   pause — the app opening, or coming back to the foreground — and never
+   appears over an open sheet or a running timer, which is how it ended up
+   landing on top of somebody mid-swipe. */
+const LAUNCHED_AT = Date.now();
+let recapWindowOpen = true;
+setTimeout(() => { recapWindowOpen = false; }, 90000);
+
+function anythingOpen() {
+  if ([...document.querySelectorAll('.sheet')].some(s => !s.hidden)) return true;
+  const overlays = ['routineRunOverlay', 'choreRunOverlay', 'habitRunOverlay', 'taskRunOverlay', 'tourOverlay'];
+  return overlays.some(id => { const el = document.getElementById(id); return el && !el.hidden; });
+}
+
 function maybeAutoRecap() {
   if (state.settings.lastRecapDate === todayStr()) return;
   const h = new Date().getHours();
   if (h < 21) return;
+  if (!recapWindowOpen) return;         // only near a launch or a return to the app
+  if (anythingOpen()) return;           // never over something the user is doing
   const r = buildRecap(todayStr());
   if (!r.tasksDone.length && !r.habitsDone.length) return;   // nothing to celebrate, don't nag
   state.settings.lastRecapDate = todayStr();
@@ -2065,8 +2102,105 @@ function openHabitSheet(h) {
   const hasRecords = !!(h && h.sessions && h.sessions.length);
   clearBtn.hidden = !hasRecords;
   if (hasRecords) clearBtn.textContent = `Clear ${h.sessions.length} record${h.sessions.length === 1 ? '' : 's'}`;
+  renderSessionLog();
   openSheet('habitSheet');
 }
+
+/* ======================= Practice log =======================
+   A timer only captures the practice you happened to do with the phone in
+   front of you. Half an hour on the guitar last night, a run without your
+   phone, a session you forgot to start — if those can't be entered by hand,
+   the records are quietly wrong and the stats stop meaning anything. */
+function renderSessionLog() {
+  const block = document.getElementById('sessionLogBlock');
+  const list = document.getElementById('sessionLogList');
+  if (!block || !list) return;
+  block.hidden = !activeHabit;
+  if (!activeHabit) return;
+
+  const sessions = (activeHabit.sessions || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+  list.innerHTML = '';
+  if (!sessions.length) {
+    list.innerHTML = '<p class="settings-note" style="text-align:left;margin:0 0 8px;">No sessions yet. Time one with the play button, or add one you already did.</p>';
+    return;
+  }
+  sessions.slice(0, 8).forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'session-row';
+    const d = s.date === todayStr() ? 'Today' : s.date;
+    row.innerHTML = `<span class="sess-date">${escapeHtml(d)}</span><span class="sess-dur">${fmtMinSec(s.seconds)}</span>
+      <button type="button" class="st-del" aria-label="Delete this session">${icon('x', 15)}</button>`;
+    row.querySelector('.st-del').addEventListener('click', () => {
+      const i = activeHabit.sessions.indexOf(s);
+      if (i >= 0) activeHabit.sessions.splice(i, 1);
+      saveState('deleting a session');
+      renderSessionLog();
+      renderAll();
+    });
+    list.appendChild(row);
+  });
+  if (sessions.length > 8) {
+    const more = document.createElement('p');
+    more.className = 'settings-note';
+    more.style.cssText = 'text-align:left;margin:2px 0 0;';
+    more.textContent = `…and ${sessions.length - 8} older. Stats has the totals.`;
+    list.appendChild(more);
+  }
+}
+
+const SESSION_HOURS = Array.from({ length: 13 }, (_, i) => i);
+const SESSION_MINS = Array.from({ length: 60 }, (_, i) => i);
+let sessionHourCtrl = null, sessionMinCtrl = null, sessionAlsoCheck = true;
+
+function openSessionSheet() {
+  if (!activeHabit) return;
+  document.getElementById('sessionDateInput').value = todayStr();
+  sessionAlsoCheck = true;
+  paintSessionCheckToggle();
+  document.getElementById('sessionHabitName').textContent = activeHabit.name;
+  openSheet('sessionSheet');                       // visible first, or the wheels can't scroll
+  sessionHourCtrl = buildWheelColumn(document.getElementById('sessionHourCol'), SESSION_HOURS, v => String(v), 0);
+  sessionMinCtrl = buildWheelColumn(document.getElementById('sessionMinCol'), SESSION_MINS, v => pad2(v), 30);
+}
+
+function paintSessionCheckToggle() {
+  const b = document.getElementById('sessionCheckToggle');
+  if (!b) return;
+  b.textContent = sessionAlsoCheck ? 'Yes' : 'No';
+  b.classList.toggle('active', sessionAlsoCheck);
+}
+
+on('sessionCheckToggle', 'click', () => { sessionAlsoCheck = !sessionAlsoCheck; paintSessionCheckToggle(); });
+on('addSessionBtn', 'click', openSessionSheet);
+
+on('sessionSaveBtn', 'click', () => {
+  if (!activeHabit) return;
+  const h = sessionHourCtrl ? sessionHourCtrl.getValue() : 0;
+  const m = sessionMinCtrl ? sessionMinCtrl.getValue() : 0;
+  const seconds = h * 3600 + m * 60;
+  if (seconds < 60) { toast('Give it at least a minute'); return; }
+  const date = document.getElementById('sessionDateInput').value || todayStr();
+  if (date > todayStr()) { toast('That day hasn’t happened yet'); return; }
+
+  if (!activeHabit.sessions) activeHabit.sessions = [];
+  activeHabit.sessions.push({ date, seconds, manual: true });
+  // A logged session implies the habit is one worth timing; turning the timer
+  // on keeps the card and the practice stats consistent with the record.
+  if (!activeHabit.timed) { activeHabit.timed = true; habitTimed = true; updateFreqUI(); }
+  if (sessionAlsoCheck && habitCount(activeHabit, date) < habitTarget(activeHabit)) {
+    activeHabit.completions[date] = habitCount(activeHabit, date) + 1;
+  }
+  saveState('logging a practice session');
+
+  const h2 = activeHabit;                          // closeSheets() clears activeHabit
+  const pr = habitPR(h2);
+  const isPr = pr === seconds && h2.sessions.length > 1;
+  closeSheets();
+  openHabitSheet(h2);                              // straight back to the habit, log updated
+  renderAll();
+  toast(isPr ? `${fmtMinSec(seconds)} logged — that's a new personal best`
+             : `${fmtMinSec(seconds)} logged for ${date === todayStr() ? 'today' : date}`, 3500);
+});
 
 function updateFreqUI() {
   document.querySelectorAll('#freqOptions .freq-opt').forEach(b => b.classList.toggle('active', b.dataset.freq === habitFreqType));
@@ -2680,6 +2814,8 @@ on('runFinishBtn', 'click', () => {
    immediately rather than waiting up to a full tick for it to look right. */
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
+  recapWindowOpen = true;
+  setTimeout(() => { recapWindowOpen = false; }, 90000);
   try {
     if (runRoutine) runTick();
     if (typeof taskRun !== 'undefined' && taskRun) taskRunTick();
@@ -4713,6 +4849,596 @@ function addSubtaskFromInput() {
 on('subtaskAddBtn', 'click', addSubtaskFromInput);
 on('subtaskInput', 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addSubtaskFromInput(); } });
 
+/* ======================= Calendar sync =======================
+   Two calendars, two completely different situations.
+
+   Google publishes a REST API that a browser can talk to directly with OAuth,
+   so that half is a real two-way sync: events come in as read-only blocks, and
+   DayFlow's own scheduled tasks go out as events it owns and updates.
+
+   Apple has no public API at all. iCloud speaks CalDAV, but iCloud sends no
+   CORS headers, so a web page is refused before it can even authenticate —
+   this is not a limitation that better code gets around. What iOS does offer
+   is the Shortcuts app, which can read and write the local calendar and hand
+   text back to a web app through x-callback-url. That, plus .ics files, is the
+   honest set of options, and the UI says so rather than implying parity. */
+const CAL_DEFAULTS = {
+  google: { clientId: null, token: null, tokenExpiry: 0, calendarId: 'primary', pull: true, push: false, lastSync: null },
+  apple: { bridge: false, lastSync: null, lastImport: null },
+};
+
+function calState() {
+  if (!state.calendar) state.calendar = JSON.parse(JSON.stringify(CAL_DEFAULTS));
+  if (!state.calendar.google) state.calendar.google = { ...CAL_DEFAULTS.google };
+  if (!state.calendar.apple) state.calendar.apple = { ...CAL_DEFAULTS.apple };
+  return state.calendar;
+}
+
+/* ---------- Shared merge ----------
+   Everything — Google, an .ics file, the Shortcuts bridge — funnels through
+   here, so there is exactly one idea of what an imported event is and one
+   place where duplicates are prevented. */
+function externalKey(source, uid) { return `${source}:${uid}`; }
+
+function importExternalEvents(events, source, range) {
+  const keep = new Set();
+  let added = 0, updated = 0;
+
+  events.forEach(ev => {
+    if (!ev || ev.allDay || ev.startMin == null || !ev.date) return;   // all-day events aren't blocks
+    const key = externalKey(source, ev.uid);
+    keep.add(key);
+    const existing = state.tasks.find(t => t.external && externalKey(t.external.source, t.external.uid) === key);
+    if (existing) {
+      const changed = existing.title !== ev.title || existing.startMin !== ev.startMin
+        || existing.durationMin !== ev.durationMin || existing.date !== ev.date;
+      if (changed) {
+        Object.assign(existing, { title: ev.title, startMin: ev.startMin, durationMin: ev.durationMin, date: ev.date });
+        updated++;
+      }
+    } else {
+      state.tasks.push({
+        id: uid(), title: ev.title, date: ev.date, startMin: ev.startMin,
+        durationMin: ev.durationMin, done: false, someday: false, subtasks: [],
+        external: { source, uid: ev.uid },
+        createdAt: Date.now(), touchedAt: Date.now(),
+      });
+      added++;
+    }
+  });
+
+  // Anything from this source inside the synced window that the calendar no
+  // longer has was deleted or moved there — drop it rather than leaving a
+  // ghost block on the grid forever.
+  let removed = 0;
+  if (range) {
+    state.tasks = state.tasks.filter(t => {
+      if (!t.external || t.external.source !== source) return true;
+      if (t.date < range.from || t.date > range.to) return true;
+      if (keep.has(externalKey(source, t.external.uid))) return true;
+      removed++;
+      return false;
+    });
+  }
+
+  if (added || updated || removed) saveState('syncing your calendar');
+  return { added, updated, removed };
+}
+
+function externalCount(source) {
+  return state.tasks.filter(t => t.external && (!source || t.external.source === source)).length;
+}
+
+function forgetExternal(source) {
+  const before = state.tasks.length;
+  state.tasks = state.tasks.filter(t => !(t.external && (!source || t.external.source === source)));
+  const n = before - state.tasks.length;
+  if (n) saveState('removing imported events');
+  return n;
+}
+
+/* ---------- .ics parsing ----------
+   Deliberately small. A full RFC 5545 implementation is a project of its own;
+   this reads the shape that Apple Calendar, Google and Fantastical actually
+   export — unfolded lines, DTSTART/DTEND or DURATION, and floating, UTC or
+   TZID-stamped times. Recurring events are expanded only as far as their
+   first instance, which is why the Shortcuts bridge is the better path on
+   iOS: it asks the calendar what is actually on today. */
+function unfoldIcs(text) {
+  return text.replace(/\r\n/g, '\n').replace(/\n[ \t]/g, '').split('\n');
+}
+
+function parseIcsDate(value, params) {
+  // 20260815T093000Z | 20260815T093000 | 20260815
+  const m = value.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/);
+  if (!m) return null;
+  const [, y, mo, d, hh, mm, , z] = m;
+  const allDay = !hh || /VALUE=DATE(?!-TIME)/.test(params || '');
+  if (allDay) return { date: `${y}-${mo}-${d}`, startMin: null, allDay: true };
+  if (z) {
+    // UTC: convert to the device's local time, which is what the grid shows.
+    const dt = new Date(Date.UTC(+y, +mo - 1, +d, +hh, +mm, 0));
+    return { date: dateStr(dt), startMin: dt.getHours() * 60 + dt.getMinutes(), allDay: false };
+  }
+  return { date: `${y}-${mo}-${d}`, startMin: (+hh) * 60 + (+mm), allDay: false };
+}
+
+function parseIcsDuration(v) {
+  const m = (v || '').match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+  if (!m) return null;
+  return (+(m[1] || 0)) * 1440 + (+(m[2] || 0)) * 60 + (+(m[3] || 0));
+}
+
+function parseIcs(text) {
+  const out = [];
+  let cur = null;
+  unfoldIcs(text).forEach(raw => {
+    const line = raw.trim();
+    if (line === 'BEGIN:VEVENT') { cur = {}; return; }
+    if (line === 'END:VEVENT') {
+      if (cur && cur.start) {
+        const dur = cur.durationMin != null ? cur.durationMin
+          : (cur.end && cur.end.startMin != null && cur.start.startMin != null
+              ? Math.max(5, (cur.end.startMin - cur.start.startMin + 1440) % 1440 || 60)
+              : 60);
+        out.push({
+          uid: cur.uid || `${cur.start.date}-${cur.start.startMin}-${(cur.title || '').slice(0, 20)}`,
+          title: cur.title || 'Busy',
+          date: cur.start.date,
+          startMin: cur.start.startMin,
+          durationMin: cur.start.allDay ? 0 : dur,
+          allDay: !!cur.start.allDay,
+        });
+      }
+      cur = null;
+      return;
+    }
+    if (!cur) return;
+    const idx = line.indexOf(':');
+    if (idx < 0) return;
+    const left = line.slice(0, idx), value = line.slice(idx + 1);
+    const name = left.split(';')[0].toUpperCase();
+    if (name === 'UID') cur.uid = value;
+    else if (name === 'SUMMARY') cur.title = value.replace(/\\,/g, ',').replace(/\\n/gi, ' ').replace(/\\;/g, ';').trim();
+    else if (name === 'DTSTART') cur.start = parseIcsDate(value, left);
+    else if (name === 'DTEND') cur.end = parseIcsDate(value, left);
+    else if (name === 'DURATION') cur.durationMin = parseIcsDuration(value);
+  });
+  return out;
+}
+
+/* ---------- .ics building (DayFlow → any calendar) ---------- */
+function buildScheduleIcs(days) {
+  const now = new Date();
+  const stamp = icsStamp(now);
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//DayFlow//Schedule//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+  let n = 0;
+  for (let i = 0; i < days; i++) {
+    const day = addDays(now, i);
+    const ds = dateStr(day);
+    state.tasks
+      .filter(t => t.date === ds && t.startMin != null && !t.external && !t.done)
+      .forEach(t => {
+        n++;
+        lines.push(
+          'BEGIN:VEVENT',
+          `UID:${t.id}@dayflow`,
+          `DTSTAMP:${stamp}`,
+          `DTSTART:${icsLocal(day, t.startMin)}`,
+          `DURATION:PT${Math.max(5, t.durationMin || 30)}M`,
+          `SUMMARY:${(t.title || 'DayFlow task').replace(/[,;\\]/g, m => '\\' + m)}`,
+          'DESCRIPTION:From DayFlow',
+          'END:VEVENT'
+        );
+      });
+  }
+  lines.push('END:VCALENDAR');
+  return { ics: lines.join('\r\n'), count: n };
+}
+
+function exportScheduleIcs(days) {
+  const { ics, count } = buildScheduleIcs(days);
+  if (!count) { toast('Nothing scheduled to export'); return 0; }
+  const blob = new Blob([ics], { type: 'text/calendar' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `dayflow-schedule-${todayStr()}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  calState().apple.lastSync = Date.now();
+  saveState('silent');
+  toast(`${count} event${count === 1 ? '' : 's'} exported — open it to add them to Calendar`, 4000);
+  renderCalendarSheet();
+  return count;
+}
+
+/* ---------- Google ---------- */
+const GCAL_BASE = 'https://www.googleapis.com/calendar/v3';
+const GIS_SRC = 'https://accounts.google.com/gsi/client';
+const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+
+function googleConnected() {
+  const g = calState().google;
+  return !!(g.token && g.tokenExpiry > Date.now());
+}
+
+function loadGis() {
+  if (window.google && window.google.accounts) return Promise.resolve(true);
+  if (loadGis._p) return loadGis._p;
+  loadGis._p = new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = GIS_SRC;
+    s.async = true;
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+  return loadGis._p;
+}
+
+async function googleConnect() {
+  const g = calState().google;
+  if (!g.clientId) { openCalendarSetup(); return false; }
+  const loaded = await loadGis();
+  if (!loaded || !window.google || !window.google.accounts) {
+    toast('Could not reach Google — check your connection', 4000);
+    return false;
+  }
+  return new Promise((resolve) => {
+    try {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: g.clientId,
+        scope: GCAL_SCOPE,
+        callback: (resp) => {
+          if (!resp || !resp.access_token) { toast('Google sign-in was cancelled'); resolve(false); return; }
+          g.token = resp.access_token;
+          // Expiry is advisory; knock 60s off so a sync never starts on a
+          // token that dies mid-request.
+          g.tokenExpiry = Date.now() + ((resp.expires_in || 3600) - 60) * 1000;
+          saveState('silent');
+          renderCalendarSheet();
+          toast('Google Calendar connected');
+          syncGoogle().then(() => resolve(true));
+        },
+      });
+      client.requestAccessToken();
+    } catch (err) {
+      console.warn('[DayFlow] google auth', err);
+      toast('Google sign-in failed — check the client ID', 4000);
+      resolve(false);
+    }
+  });
+}
+
+function googleDisconnect() {
+  const g = calState().google;
+  try {
+    if (g.token && window.google && window.google.accounts) window.google.accounts.oauth2.revoke(g.token, () => {});
+  } catch (e) { /* best effort */ }
+  g.token = null;
+  g.tokenExpiry = 0;
+  const n = forgetExternal('google');
+  saveState('disconnecting Google Calendar');
+  renderCalendarSheet();
+  renderAll();
+  toast(n ? `Disconnected — ${n} imported event${n === 1 ? '' : 's'} removed` : 'Disconnected');
+}
+
+async function gcalFetch(path, opts = {}) {
+  const g = calState().google;
+  const res = await fetch(GCAL_BASE + path, {
+    ...opts,
+    headers: {
+      Authorization: 'Bearer ' + g.token,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 401) {
+    g.token = null; g.tokenExpiry = 0;
+    saveState('silent');
+    throw new Error('Google sign-in expired — connect again');
+  }
+  if (!res.ok) throw new Error('Google said ' + res.status);
+  return res.status === 204 ? null : res.json();
+}
+
+function gcalEventToEvent(ev) {
+  if (!ev || ev.status === 'cancelled') return null;
+  if (ev.start && ev.start.date && !ev.start.dateTime) {
+    return { uid: ev.id, title: ev.summary || 'Busy', date: ev.start.date, startMin: null, durationMin: 0, allDay: true };
+  }
+  if (!ev.start || !ev.start.dateTime) return null;
+  const s = new Date(ev.start.dateTime);
+  const e = ev.end && ev.end.dateTime ? new Date(ev.end.dateTime) : new Date(s.getTime() + 3600000);
+  return {
+    uid: ev.id,
+    title: ev.summary || 'Busy',
+    date: dateStr(s),
+    startMin: s.getHours() * 60 + s.getMinutes(),
+    durationMin: Math.max(5, Math.round((e - s) / 60000)),
+    allDay: false,
+  };
+}
+
+function taskToGcalEvent(t) {
+  const [y, mo, d] = t.date.split('-').map(Number);
+  const start = new Date(y, mo - 1, d, Math.floor(t.startMin / 60), t.startMin % 60, 0);
+  const end = new Date(start.getTime() + Math.max(5, t.durationMin || 30) * 60000);
+  const iso = (x) => `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}T${pad2(x.getHours())}:${pad2(x.getMinutes())}:00`;
+  return {
+    summary: t.title,
+    description: 'Scheduled in DayFlow',
+    start: { dateTime: iso(start), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    end: { dateTime: iso(end), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+  };
+}
+
+const SYNC_DAYS = 7;
+
+async function syncGoogle(opts = {}) {
+  const g = calState().google;
+  if (!googleConnected()) { if (!opts.quiet) toast('Connect Google Calendar first'); return null; }
+  const from = todayStr();
+  const to = dateStr(addDays(new Date(), SYNC_DAYS - 1));
+  let pulled = { added: 0, updated: 0, removed: 0 }, pushed = 0, failed = 0;
+
+  try {
+    if (g.pull) {
+      const timeMin = new Date(); timeMin.setHours(0, 0, 0, 0);
+      const timeMax = addDays(new Date(), SYNC_DAYS); timeMax.setHours(0, 0, 0, 0);
+      const q = `?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}` +
+                '&singleEvents=true&orderBy=startTime&maxResults=250';
+      const data = await gcalFetch(`/calendars/${encodeURIComponent(g.calendarId || 'primary')}/events${q}`);
+      const events = (data.items || [])
+        .map(gcalEventToEvent)
+        .filter(Boolean)
+        // Never re-import an event DayFlow itself created, or the two copies
+        // would breed: one as a task, one as an imported block.
+        .filter(ev => !state.tasks.some(t => t.gcalId === ev.uid));
+      pulled = importExternalEvents(events, 'google', { from, to });
+    }
+
+    if (g.push) {
+      const mine = state.tasks.filter(t =>
+        !t.external && !t.done && t.startMin != null && t.date >= from && t.date <= to);
+      for (const t of mine) {
+        try {
+          const body = JSON.stringify(taskToGcalEvent(t));
+          const cal = encodeURIComponent(g.calendarId || 'primary');
+          if (t.gcalId) {
+            await gcalFetch(`/calendars/${cal}/events/${encodeURIComponent(t.gcalId)}`, { method: 'PATCH', body });
+          } else {
+            const created = await gcalFetch(`/calendars/${cal}/events`, { method: 'POST', body });
+            t.gcalId = created.id;
+          }
+          pushed++;
+        } catch (e) { failed++; }
+      }
+      if (pushed) saveState('silent');
+    }
+
+    g.lastSync = Date.now();
+    saveState('silent');
+    renderAll();
+    renderCalendarSheet();
+    if (!opts.quiet) {
+      const bits = [];
+      if (g.pull) bits.push(`${pulled.added} new, ${pulled.updated} changed${pulled.removed ? `, ${pulled.removed} gone` : ''}`);
+      if (g.push) bits.push(`${pushed} sent${failed ? `, ${failed} failed` : ''}`);
+      toast(bits.length ? 'Synced · ' + bits.join(' · ') : 'Synced', 4000);
+    }
+    return { pulled, pushed, failed };
+  } catch (err) {
+    console.warn('[DayFlow] google sync', err);
+    if (!opts.quiet) toast(err.message || 'Google sync failed', 4500);
+    renderCalendarSheet();
+    return null;
+  }
+}
+
+/* ---------- Apple, via Shortcuts ----------
+   The same x-callback-url trick the triple alarm uses. A shortcut you build
+   once reads today's events and hands them back as lines of text, which is
+   the only route from the iOS calendar into a web app that exists. */
+const CAL_SHORTCUT_NAME = 'DayFlow Calendar';
+
+const CAL_SETUP_STEPS = [
+  'Open <strong>Shortcuts</strong> and tap <strong>+</strong> to create a new one.',
+  'Add <strong>Find Calendar Events</strong>. Set the filter to <strong>Start Date is Today</strong>, and sort by Start Date.',
+  'Add <strong>Repeat with Each</strong> and put a <strong>Text</strong> action inside it containing, on one line: <strong>Start Date|Duration|Title</strong> — insert Start Date (Format: Custom, <strong>HH:mm</strong>), then a bar, then Duration in minutes, then a bar, then Title.',
+  'Under the repeat, add <strong>Combine Text</strong> with the Repeat Results, separated by <strong>New Lines</strong>.',
+  'Rename the shortcut to exactly <strong>DayFlow Calendar</strong>.',
+  'Come back here and tap <strong>Pull today from Calendar</strong>.',
+];
+
+function buildCalShortcutUrl() {
+  return 'shortcuts://x-callback-url/run-shortcut' +
+         '?name=' + encodeURIComponent(CAL_SHORTCUT_NAME) +
+         '&x-success=' + encodeURIComponent(location.origin + location.pathname + '?cal=ok') +
+         '&x-error=' + encodeURIComponent(location.origin + location.pathname + '?cal=err') +
+         '&x-cancel=' + encodeURIComponent(location.origin + location.pathname + '?cal=cancel');
+}
+
+function runCalendarShortcut() {
+  const url = buildCalShortcutUrl();
+  document.body.dataset.lastCalUrl = url;
+  // A synthesised link, not location.href: an unhandled custom scheme kills
+  // the page outright, which is how the alarm hand-off used to lose state.
+  const a = document.createElement('a');
+  a.href = url;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => a.remove(), 500);
+}
+
+/* Shortcuts appends the shortcut's text output to the success URL as
+   `result=`. Each line is HH:MM|minutes|Title. */
+function parseShortcutCalendar(text) {
+  const ds = todayStr();
+  return (text || '').split(/[\r\n]+/).map(line => {
+    const parts = line.split('|');
+    if (parts.length < 3) return null;
+    const tm = parts[0].trim().match(/^(\d{1,2}):(\d{2})/);
+    if (!tm) return null;
+    const title = parts.slice(2).join('|').trim();
+    const dur = Math.max(5, parseInt(parts[1], 10) || 60);
+    return {
+      uid: `${ds}-${parts[0].trim()}-${title.slice(0, 24)}`,
+      title: title || 'Busy',
+      date: ds,
+      startMin: (+tm[1]) * 60 + (+tm[2]),
+      durationMin: dur,
+      allDay: false,
+    };
+  }).filter(Boolean);
+}
+
+function handleCalendarReturn(flag, result) {
+  if (flag === 'err') {
+    toast(`No shortcut named “${CAL_SHORTCUT_NAME}” yet — here's how to make it`, 6000);
+    openCalendarSetup();
+    return;
+  }
+  if (flag === 'cancel') return;
+  const events = parseShortcutCalendar(result);
+  if (!events.length) {
+    toast('The shortcut ran but returned nothing DayFlow could read — check step 3 of the guide', 6000);
+    openCalendarSetup();
+    return;
+  }
+  const res = importExternalEvents(events, 'apple', { from: todayStr(), to: todayStr() });
+  calState().apple.bridge = true;
+  calState().apple.lastImport = Date.now();
+  saveState('silent');
+  renderAll();
+  toast(`${events.length} event${events.length === 1 ? '' : 's'} from Calendar · ${res.added} new`, 4000);
+}
+
+/* ---------- Calendar UI ---------- */
+function fmtAgo(ts) {
+  if (!ts) return 'never';
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+function renderCalendarSheet() {
+  const sheet = document.getElementById('calendarSheet');
+  if (!sheet || sheet.hidden) return;
+  const g = calState().google, a = calState().apple;
+
+  const gBtn = document.getElementById('gcalConnectBtn');
+  const connected = googleConnected();
+  gBtn.textContent = connected ? 'Disconnect' : (g.clientId ? 'Connect' : 'Set up');
+  gBtn.classList.toggle('accent', !connected);
+  document.getElementById('gcalSyncBtn').disabled = !connected;
+  document.getElementById('gcalStatus').textContent = connected
+    ? `Connected · last sync ${fmtAgo(g.lastSync)} · ${externalCount('google')} event${externalCount('google') === 1 ? '' : 's'} showing`
+    : g.clientId
+      ? 'Not connected. Your client ID is saved — tap Connect to sign in.'
+      : 'Needs a Google OAuth client ID of your own. DayFlow has no server and no shared account, so the credential has to be yours — the setup sheet walks through it in about three minutes.';
+
+  document.getElementById('gcalPullBtn').textContent = g.pull ? 'On' : 'Off';
+  document.getElementById('gcalPullBtn').classList.toggle('active', !!g.pull);
+  document.getElementById('gcalPushBtn').textContent = g.push ? 'On' : 'Off';
+  document.getElementById('gcalPushBtn').classList.toggle('active', !!g.push);
+
+  document.getElementById('appleStatus').textContent = a.lastImport
+    ? `Shortcut bridge used ${fmtAgo(a.lastImport)} · ${externalCount('apple')} event${externalCount('apple') === 1 ? '' : 's'} showing`
+    : 'Apple has no calendar API a web app can call — iCloud refuses browser requests outright. The Shortcuts app can read your calendar and hand the events back, which is the closest thing to a real sync on iOS.';
+}
+
+function openCalendar() { openSheet('calendarSheet'); renderCalendarSheet(); }
+on('calendarBtn', 'click', () => { closeSheets(); openCalendar(); });
+on('calendarDoneBtn', 'click', closeSheets);
+
+function openCalendarSetup() {
+  const list = document.getElementById('calSetupSteps');
+  if (list) list.innerHTML = CAL_SETUP_STEPS.map(s => `<li>${s}</li>`).join('');
+  const input = document.getElementById('gcalClientInput');
+  if (input) input.value = calState().google.clientId || '';
+  openSheet('calSetupSheet');
+}
+on('calSetupBtn', 'click', openCalendarSetup);
+on('calSetupDoneBtn', 'click', () => { closeSheets(); openCalendar(); });
+
+on('gcalSaveClientBtn', 'click', async () => {
+  const v = document.getElementById('gcalClientInput').value.trim();
+  calState().google.clientId = v || null;
+  saveState('silent');
+  toast(v ? 'Client ID saved' : 'Client ID cleared');
+  closeSheets();
+  openCalendar();
+  if (v) await googleConnect();
+});
+
+on('gcalConnectBtn', 'click', async () => {
+  if (googleConnected()) { googleDisconnect(); return; }
+  if (!calState().google.clientId) { openCalendarSetup(); return; }
+  await googleConnect();
+});
+on('gcalSyncBtn', 'click', () => syncGoogle());
+on('gcalPullBtn', 'click', () => {
+  const g = calState().google;
+  g.pull = !g.pull;
+  if (!g.pull) forgetExternal('google');
+  saveState('silent');
+  renderCalendarSheet();
+  renderAll();
+});
+on('gcalPushBtn', 'click', () => {
+  const g = calState().google;
+  g.push = !g.push;
+  saveState('silent');
+  renderCalendarSheet();
+  if (g.push) toast('DayFlow will add its scheduled tasks to Google on the next sync', 4000);
+});
+
+on('appleImportBtn', 'click', runCalendarShortcut);
+on('appleExportBtn', 'click', () => exportScheduleIcs(SYNC_DAYS));
+on('appleExportTodayBtn', 'click', () => exportScheduleIcs(1));
+on('appleSetupBtn', 'click', openCalendarSetup);
+on('appleForgetBtn', 'click', () => {
+  const n = forgetExternal('apple');
+  renderAll();
+  renderCalendarSheet();
+  toast(n ? `${n} imported event${n === 1 ? '' : 's'} removed` : 'Nothing imported to remove');
+});
+
+on('icsImportFile', 'change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const events = parseIcs(String(reader.result));
+      if (!events.length) { toast('No events found in that file'); return; }
+      const dated = events.map(ev => ev.date).sort();
+      const res = importExternalEvents(events, 'apple', { from: dated[0], to: dated[dated.length - 1] });
+      calState().apple.lastImport = Date.now();
+      saveState('silent');
+      renderAll();
+      renderCalendarSheet();
+      const skipped = events.filter(ev => ev.allDay).length;
+      toast(`${res.added} event${res.added === 1 ? '' : 's'} imported${res.updated ? `, ${res.updated} updated` : ''}${skipped ? ` · ${skipped} all-day skipped` : ''}`, 4500);
+    } catch (err) {
+      console.warn('[DayFlow] ics import', err);
+      toast('That file could not be read as a calendar');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
 /* ======================= Focus & flow controls ======================= */
 on('focusBtn', 'click', () => {
   state.settings.focusMode = !state.settings.focusMode;
@@ -4982,6 +5708,15 @@ if (ALARM_RESULT) {
   try { history.replaceState(null, '', location.pathname); } catch (e) { /* non-fatal */ }
 }
 
+/* Shortcuts hands the calendar back the same way it reports alarm results:
+   a flag plus the shortcut's text output in `result`. */
+const CAL_PARAMS = new URLSearchParams(location.search);
+const CAL_RESULT = (location.search.match(/[?&]cal=(ok|err|cancel)/) || [])[1] || null;
+const CAL_PAYLOAD = CAL_PARAMS.get('result') || '';
+if (CAL_RESULT) {
+  try { history.replaceState(null, '', location.pathname); } catch (e) { /* non-fatal */ }
+}
+
 /* Drop the ?fresh= marker left by a forced update so it doesn't linger. */
 const CAME_FROM_UPDATE = location.search.includes('fresh=');
 if (CAME_FROM_UPDATE) {
@@ -5057,6 +5792,15 @@ setInterval(() => { if (state.view.current === 'today') renderGrid(currentTodayD
 // The time bar only means anything if it actually moves.
 setInterval(renderTimeBar, 15000);
 renderTimeBar();
+
+if (CAL_RESULT) setTimeout(() => handleCalendarReturn(CAL_RESULT, CAL_PAYLOAD), 500);
+
+// A quiet refresh on launch and every half hour, so the grid reflects the
+// calendar without anyone having to remember to press sync.
+if (googleConnected()) {
+  setTimeout(() => syncGoogle({ quiet: true }), 2500);
+  setInterval(() => { if (googleConnected()) syncGoogle({ quiet: true }); }, 30 * 60 * 1000);
+}
 
 /* ======================= Service worker ======================= */
 if ('serviceWorker' in navigator) {
