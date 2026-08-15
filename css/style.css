@@ -943,3 +943,21 @@ button { font-family: inherit; }
 /* Alarm delivery choice */
 .alarm-method-row { flex-direction: column; align-items: stretch; gap: 9px; border-top: none; padding-top: 0; }
 #alarmClockActions { margin-top: 0; }
+
+/* Clock-alarm setup guide */
+.setup-name-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--bg-sunken); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.setup-name-label {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-faint);
+}
+.setup-name { font-size: 16px; font-weight: 800; margin-top: 2px; }
+.setup-steps { margin: 0 0 14px; padding-left: 22px; }
+.setup-steps li {
+  font-size: 14px; line-height: 1.5; color: var(--text);
+  margin-bottom: 10px; padding-left: 2px;
+}
+.setup-steps li strong { font-weight: 800; }

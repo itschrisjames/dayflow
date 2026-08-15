@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=18">
+<link rel="stylesheet" href="css/style.css?v=19">
 </head>
 <body>
 
@@ -288,6 +288,24 @@
   </div>
 </div>
 
+<div id="alarmSetupSheet" class="sheet sheet-tall" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Set up Clock alarms</h2>
+    <p class="settings-note" style="text-align:left;margin:0 0 12px;">iOS doesn't let a web app create Clock alarms directly. The Shortcuts app can, so DayFlow hands the times to a shortcut you build once. Takes about two minutes.</p>
+    <div class="setup-name-row">
+      <div>
+        <div class="setup-name-label">Name it exactly</div>
+        <div class="setup-name" id="setupShortcutName">DayFlow Alarms</div>
+      </div>
+      <button type="button" id="copyShortcutNameBtn" class="pill-btn small">Copy</button>
+    </div>
+    <ol class="setup-steps" id="setupSteps"></ol>
+    <p class="settings-note" style="text-align:left;">If the actions don't match your iOS version, or you'd rather not bother, switch Send to → <strong>Calendar</strong>. No setup, though they arrive as Calendar alerts rather than Clock alarms.</p>
+    <button id="alarmSetupDoneBtn" class="primary-btn">Done</button>
+  </div>
+</div>
+
 <div id="taskDurationSheet" class="sheet" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
@@ -432,6 +450,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="js/app.js?v=18"></script>
+<script src="js/app.js?v=19"></script>
 </body>
 </html>

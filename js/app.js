@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 const APP_BUILT = '2026-08-15';
 
 /* ======================= Storage ======================= */
@@ -2196,9 +2196,20 @@ document.querySelectorAll('#alarmMethodOptions .freq-opt').forEach(btn => {
   });
 });
 
+function appReturnUrl(flag) {
+  return location.origin + location.pathname + '?alarm=' + flag;
+}
+
+/* x-callback-url means Shortcuts reports back. Without it, a missing shortcut
+   just dead-ends on an error screen in another app and DayFlow never knows —
+   which is exactly how "could not find the shortcut" becomes a mystery. */
 function buildShortcutUrl(stack) {
-  return 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME) +
-         '&input=text&text=' + encodeURIComponent(alarmTimesText(stack));
+  return 'shortcuts://x-callback-url/run-shortcut' +
+         '?name=' + encodeURIComponent(SHORTCUT_NAME) +
+         '&input=text&text=' + encodeURIComponent(alarmTimesText(stack)) +
+         '&x-success=' + encodeURIComponent(appReturnUrl('ok')) +
+         '&x-error=' + encodeURIComponent(appReturnUrl('err')) +
+         '&x-cancel=' + encodeURIComponent(appReturnUrl('cancel'));
 }
 
 function runAlarmShortcut(stack) {
@@ -2237,19 +2248,37 @@ on('alarmCopyBtn', 'click', async () => {
   }
 });
 
-on('alarmSetupBtn', 'click', () => {
-  const stack = { startMin: alarmSelectedMin() };
-  alert(
-    'One-time setup so DayFlow can set real Clock alarms:\n\n' +
-    '1. Open the Shortcuts app, tap +\n' +
-    `2. Name it exactly: ${SHORTCUT_NAME}\n` +
-    '3. Add the action "Split Text" — Text: Shortcut Input, Separator: Custom, ","\n' +
-    '4. Add "Repeat with Each" over the Split Text result\n' +
-    '5. Inside the loop add Clock\u2019s "Create Alarm" action, set its time to Repeat Item\n' +
-    '6. Save\n\n' +
-    `DayFlow then sends it "${alarmTimesText(stack)}" and Clock gets all three alarms.\n\n` +
-    'Not up for that? Switch to Calendar above — it needs no setup.'
-  );
+const SETUP_STEPS = [
+  'Open the <strong>Shortcuts</strong> app and tap <strong>+</strong> to create a new shortcut.',
+  'Tap the name at the top and set it to <strong>DayFlow Alarms</strong> — it has to match exactly.',
+  'Add the action <strong>Split Text</strong>. Set Text to <strong>Shortcut Input</strong>, and Separator to <strong>Custom</strong> with a comma.',
+  'Add <strong>Repeat with Each</strong>, using the Split Text result.',
+  'Inside the repeat, add <strong>Create Alarm</strong> and set its time to <strong>Repeat Item</strong>.',
+  'Save. DayFlow sends it times like <strong>22:00,22:02,22:04</strong> and Clock gets all three.',
+];
+
+function openAlarmSetup() {
+  const list = document.getElementById('setupSteps');
+  if (list && !list.childElementCount) {
+    SETUP_STEPS.forEach(step => {
+      const li = document.createElement('li');
+      li.innerHTML = step;
+      list.appendChild(li);
+    });
+  }
+  openSheet('alarmSetupSheet');
+}
+
+on('alarmSetupBtn', 'click', openAlarmSetup);
+on('alarmSetupDoneBtn', 'click', closeSheets);
+
+on('copyShortcutNameBtn', 'click', async () => {
+  try {
+    await navigator.clipboard.writeText(SHORTCUT_NAME);
+    toast('Copied “' + SHORTCUT_NAME + '”');
+  } catch (e) {
+    toast(SHORTCUT_NAME, 5000);
+  }
 });
 
 function renderAlarmStackList() {
@@ -3345,6 +3374,13 @@ function renderAll() {
   if (state.view.current === 'stats') renderStats();
 }
 
+/* Shortcuts returns here via x-callback-url, so a missing shortcut is reported
+   in-app with the fix, instead of leaving the user on an error in another app. */
+const ALARM_RESULT = (location.search.match(/[?&]alarm=(ok|err|cancel)/) || [])[1] || null;
+if (ALARM_RESULT) {
+  try { history.replaceState(null, '', location.pathname); } catch (e) { /* non-fatal */ }
+}
+
 /* Drop the ?fresh= marker left by a forced update so it doesn't linger. */
 const CAME_FROM_UPDATE = location.search.includes('fresh=');
 if (CAME_FROM_UPDATE) {
@@ -3363,6 +3399,15 @@ state.view.current = 'today';
 state.view.todayOffset = 0;
 state.view.weekOffset = 0;
 switchView('today');
+
+if (ALARM_RESULT === 'ok') {
+  setTimeout(() => toast('Alarms set in Clock', 4000), 500);
+} else if (ALARM_RESULT === 'err') {
+  setTimeout(() => {
+    toast(`No shortcut named “${SHORTCUT_NAME}” yet — here's how to make it`, 6000);
+    openAlarmSetup();
+  }, 500);
+}
 
 // Confirm a forced update actually completed, so it isn't a silent no-op.
 if (CAME_FROM_UPDATE) {
