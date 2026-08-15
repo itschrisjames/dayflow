@@ -939,3 +939,7 @@ button { font-family: inherit; }
 /* Undo lives in the top bar and only appears when there is something to undo */
 .undo-btn { color: var(--accent); }
 .undo-btn:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* Alarm delivery choice */
+.alarm-method-row { flex-direction: column; align-items: stretch; gap: 9px; border-top: none; padding-top: 0; }
+#alarmClockActions { margin-top: 0; }

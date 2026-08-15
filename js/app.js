@@ -29,8 +29,8 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v17';
-const APP_BUILT = '2026-08-14';
+const APP_VERSION = 'v18';
+const APP_BUILT = '2026-08-15';
 
 /* ======================= Storage ======================= */
 const STORE_KEY = 'dayflow.v1';
@@ -276,6 +276,7 @@ function ensureNewCollections(s) {
   if (!s.aiMemory) s.aiMemory = { facts: [] };
   if (!s.aiMemory.facts) s.aiMemory.facts = [];
   if (s.settings && s.settings.showSchedule === undefined) s.settings.showSchedule = false;
+  if (s.settings && !s.settings.alarmMethod) s.settings.alarmMethod = 'clock';
   // Existing installs seeded the day list as "Errands"; it's the To Do List now.
   (s.lists || []).forEach(l => { if (l.name === 'Errands') l.name = 'To Do List'; });
 }
@@ -359,12 +360,16 @@ const views = ['today', 'week', 'habits', 'routines', 'chores', 'chat', 'stats']
 const titles = { today: 'Today', week: 'Week', habits: 'Habits', routines: 'Routines', chores: 'Chore Timer', chat: 'Assistant', stats: 'Stats' };
 
 function switchView(name) {
+  const changed = state.view.current !== name;
   state.view.current = name;
   views.forEach(v => document.getElementById('view-' + v).classList.toggle('active', v === name));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
   document.getElementById('viewTitle').textContent = titles[name];
   updateInputBarMode();
   renderAll();
+  // Entering Today with the schedule already expanded used to render the grid
+  // parked at midnight, leaving the current-time marker far below the fold.
+  if (name === 'today' && state.settings.showSchedule) scrollGridToRelevant();
 }
 
 // The single bottom input bar doubles as quick-capture and the chat composer.
@@ -484,18 +489,27 @@ function renderScheduleToggle(ds) {
   toggle.classList.toggle('open', open);
   document.getElementById('gridScroll').hidden = !open;
 
+  const summaryEl = document.getElementById('scheduleSummary');
+  if (open) { summaryEl.textContent = ''; return; }
+
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const isToday = ds === todayStr();
+  // Show the time even while collapsed, so "now" is visible without expanding.
+  const nowBit = isToday ? `now ${minToShort(nowMin)} · ` : '';
+
   const blocks = state.tasks
     .filter(t => t.date === ds && t.startMin != null)
     .sort((a, b) => a.startMin - b.startMin);
-  const summaryEl = document.getElementById('scheduleSummary');
-  if (open) { summaryEl.textContent = ''; return; }
-  if (!blocks.length) { summaryEl.textContent = 'nothing scheduled'; return; }
 
-  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-  const isToday = ds === todayStr();
-  const upcoming = isToday ? blocks.find(b => !b.done && b.startMin + b.durationMin > nowMin) : blocks.find(b => !b.done);
-  const n = `${blocks.length} block${blocks.length === 1 ? '' : 's'}`;
+  if (!blocks.length) { summaryEl.textContent = `${nowBit}nothing scheduled`; return; }
+
+  const n = `${nowBit}${blocks.length} block${blocks.length === 1 ? '' : 's'}`;
   const unfinished = blocks.filter(b => !b.done).length;
+  const upcoming = isToday
+    ? blocks.find(b => !b.done && b.startMin + b.durationMin > nowMin)
+    : blocks.find(b => !b.done);
+
   if (upcoming) {
     summaryEl.textContent = `${n} · next ${upcoming.title} at ${minToLabel(upcoming.startMin)}`;
   } else if (unfinished) {
@@ -2069,6 +2083,7 @@ function openAlarmSheet() {
     });
 
   renderAlarmPreview();
+  renderAlarmMethod();
 }
 
 function icsStamp(d) {
@@ -2135,6 +2150,108 @@ function downloadAlarmIcs(stack) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+
+/* ---------- Delivering the alarms ----------
+   iOS gives web pages no way to write to the Clock app — there is no public
+   URL scheme or API that creates an alarm, and anything claiming otherwise
+   would be guesswork. The one route that genuinely reaches Clock is the
+   Shortcuts app: a shortcut the user saves once can call Clock's "Create
+   Alarm" action, and a web page is allowed to run a named shortcut by URL.
+   So: Clock via Shortcuts (needs one-time setup, real alarms), or a calendar
+   file (no setup, but Calendar alerts rather than Clock alarms). */
+const SHORTCUT_NAME = 'DayFlow Alarms';
+
+function alarmTimes(stack) {
+  return [0, ALARM_GAP_MIN, ALARM_GAP_MIN * 2].map(off => (stack.startMin + off) % 1440);
+}
+function alarmTimesText(stack) {
+  return alarmTimes(stack).map(m => minToTimeInput(m)).join(',');
+}
+
+function alarmMethod() { return state.settings.alarmMethod === 'calendar' ? 'calendar' : 'clock'; }
+
+function renderAlarmMethod() {
+  const method = alarmMethod();
+  document.querySelectorAll('#alarmMethodOptions .freq-opt').forEach(b =>
+    b.classList.toggle('active', b.dataset.method === method));
+  const note = document.getElementById('alarmMethodNote');
+  const clockActions = document.getElementById('alarmClockActions');
+  const createBtn = document.getElementById('alarmCreateBtn');
+  if (method === 'clock') {
+    if (note) note.textContent = `Runs a Shortcut named “${SHORTCUT_NAME}” that creates the alarms in Clock. It needs setting up once — tap Setup guide.`;
+    if (clockActions) clockActions.hidden = false;
+    if (createBtn) createBtn.innerHTML = icon('alarm', 18) + '<span>Set 3 alarms in Clock</span>';
+  } else {
+    if (note) note.textContent = 'Downloads a calendar file. No setup, but these fire as Calendar alerts rather than Clock alarms.';
+    if (clockActions) clockActions.hidden = true;
+    if (createBtn) createBtn.innerHTML = icon('alarm', 18) + '<span>Add 3 alerts to Calendar</span>';
+  }
+}
+
+document.querySelectorAll('#alarmMethodOptions .freq-opt').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.settings.alarmMethod = btn.dataset.method;
+    saveState('alarm method');
+    renderAlarmMethod();
+  });
+});
+
+function buildShortcutUrl(stack) {
+  return 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME) +
+         '&input=text&text=' + encodeURIComponent(alarmTimesText(stack));
+}
+
+function runAlarmShortcut(stack) {
+  const url = buildShortcutUrl(stack);
+  // Recorded so the exact hand-off is inspectable if Shortcuts doesn't open.
+  document.body.dataset.lastAlarmUrl = url;
+  // A synthesised link click is the reliable way to hand a custom scheme to
+  // iOS, and — unlike assigning location.href — it leaves the page intact if
+  // nothing on the device handles the scheme.
+  const a = document.createElement('a');
+  a.href = url;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => a.remove(), 0);
+}
+
+function deliverAlarmStack(stack) {
+  if (alarmMethod() === 'clock') {
+    runAlarmShortcut(stack);
+    toast('Opening Shortcuts…');
+  } else {
+    downloadAlarmIcs(stack);
+    toast('Opening in Calendar…');
+  }
+}
+
+on('alarmCopyBtn', 'click', async () => {
+  const stack = { startMin: alarmSelectedMin() };
+  const text = alarmTimes(stack).map(m => minToLabel(m)).join('   ');
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied: ' + text, 4000);
+  } catch (e) {
+    toast(text, 6000);   // clipboard blocked: at least show them the times
+  }
+});
+
+on('alarmSetupBtn', 'click', () => {
+  const stack = { startMin: alarmSelectedMin() };
+  alert(
+    'One-time setup so DayFlow can set real Clock alarms:\n\n' +
+    '1. Open the Shortcuts app, tap +\n' +
+    `2. Name it exactly: ${SHORTCUT_NAME}\n` +
+    '3. Add the action "Split Text" — Text: Shortcut Input, Separator: Custom, ","\n' +
+    '4. Add "Repeat with Each" over the Split Text result\n' +
+    '5. Inside the loop add Clock\u2019s "Create Alarm" action, set its time to Repeat Item\n' +
+    '6. Save\n\n' +
+    `DayFlow then sends it "${alarmTimesText(stack)}" and Clock gets all three alarms.\n\n` +
+    'Not up for that? Switch to Calendar above — it needs no setup.'
+  );
+});
+
 function renderAlarmStackList() {
   const wrap = document.getElementById('alarmStackList');
   wrap.innerHTML = '';
@@ -2149,10 +2266,7 @@ function renderAlarmStackList() {
       <button class="asc-btn dl" data-act="dl" aria-label="Re-download">${icon('download', 18)}</button>
       <button class="asc-btn" data-act="del" aria-label="Delete">${icon('x', 17)}</button>
     `;
-    card.querySelector('[data-act="dl"]').addEventListener('click', () => {
-      downloadAlarmIcs(stack);
-      toast('Opening in Calendar…');
-    });
+    card.querySelector('[data-act="dl"]').addEventListener('click', () => deliverAlarmStack(stack));
     card.querySelector('[data-act="del"]').addEventListener('click', () => {
       state.alarmStacks = state.alarmStacks.filter(s => s.id !== stack.id);
       saveState();
@@ -2168,10 +2282,9 @@ on('alarmCreateBtn', 'click', () => {
   const label = document.getElementById('alarmLabelInput').value.trim() || 'DayFlow Alarm';
   const stack = { id: uid(), startMin, label, createdAt: Date.now() };
   state.alarmStacks.push(stack);
-  saveState();
-  downloadAlarmIcs(stack);
+  saveState('alarm stack');
   renderAlarmStackList();
-  toast('3 alarms created — add them in Calendar');
+  deliverAlarmStack(stack);
 });
 
 /* ======================= Habit timer ======================= */
@@ -3244,6 +3357,11 @@ applyTheme();
 // the last save — and since the Assistant persists its greeting the moment you
 // visit it, that made every relaunch land on the Assistant tab.
 state.view.current = 'today';
+// A stray day/week offset could persist from a previous session (paging to
+// tomorrow then doing anything that saves), which silently hides the now-line
+// because you are no longer looking at today.
+state.view.todayOffset = 0;
+state.view.weekOffset = 0;
 switchView('today');
 
 // Confirm a forced update actually completed, so it isn't a silent no-op.
