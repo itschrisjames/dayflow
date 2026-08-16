@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DayFlow — what's changed</title>
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17171a" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../icons/icon-192.png">
+<style>
+  :root {
+    --bg: #faf9f6; --bg-elev: #ffffff; --bg-sunken: #f1efe9;
+    --text: #1c1b19; --text-dim: #6f6b63; --text-faint: #a8a29a;
+    --border: #e6e2da; --accent: #ff8c42; --accent-text: #fff; --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --bg-elev: #201f23; --bg-sunken: #131215;
+      --text: #f2f0ec; --text-dim: #a19c93; --text-faint: #6b675f;
+      --border: #2f2e32; --accent-text: #17171a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); line-height: 1.6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 660px; margin: 0 auto; padding: 0 22px 70px; }
+  header { padding: 52px 0 26px; }
+  h1 { font-size: 34px; margin: 0 0 8px; letter-spacing: -0.03em; font-weight: 800; }
+  .sub { color: var(--text-dim); margin: 0; }
+  .back { display: inline-block; margin-top: 18px; color: var(--accent); text-decoration: none; font-weight: 700; font-size: 15px; }
+  .rel { border-top: 1px solid var(--border); padding: 26px 0 6px; }
+  .rel h2 { font-size: 19px; margin: 0 0 4px; font-weight: 800; }
+  .tag {
+    display: inline-block; padding: 3px 10px; border-radius: 10px; margin-bottom: 10px;
+    background: var(--bg-sunken); color: var(--text-dim);
+    font-size: 11.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .tag.now { background: var(--accent); color: var(--accent-text); }
+  ul { padding-left: 20px; margin: 10px 0 0; }
+  li { margin-bottom: 9px; color: var(--text-dim); font-size: 15px; }
+  li strong { color: var(--text); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>What's changed</h1>
+    <p class="sub">Newest first. Update from Settings → Check for update.</p>
+    <a class="back" href="./">← Back</a>
+  </header>
+
+  <div class="rel">
+    <span class="tag now">v24 — current</span>
+    <h2>A landing page, feedback, and supporter keys</h2>
+    <ul>
+      <li>A page to send people, with install instructions, honest limitations and this changelog.</li>
+      <li><strong>Send feedback</strong> in Settings, pre-filled with your build number and screen size — and no task names.</li>
+      <li>Supporter keys, verified offline. Nothing is locked behind one; DayFlow asks once, after three weeks of real use, and never again if you say no.</li>
+    </ul>
+  </div>
+
+  <div class="rel">
+    <span class="tag">v23</span>
+    <h2>Timers survive the screen going off</h2>
+    <ul>
+      <li>A running timer is written to storage the moment it starts, so if iOS discards the app in the background it's <strong>picked up mid-flight</strong> on the next launch, with the real elapsed time. Habit, chore, task and routine alike.</li>
+      <li>A routine rolls forward through however many steps elapsed while you were away.</li>
+      <li>Anything left running over six hours isn't resumed — it's dropped with an explanation rather than logging a nine-hour session you didn't do.</li>
+      <li>DayFlow now <strong>keeps the screen awake</strong> while a timer runs. Switch it off in Settings if you'd rather save battery.</li>
+    </ul>
+  </div>
+
+  <div class="rel">
+    <span class="tag">v22</span>
+    <h2>Calendar sync, and practice sessions by hand</h2>
+    <ul>
+      <li><strong>Google Calendar</strong> two-way sync. Your events arrive as locked blocks; sending your own blocks out is opt-in and off by default.</li>
+      <li><strong>Apple Calendar</strong> via the three routes that actually exist: a Shortcuts bridge that reads today's events, .ics import, and .ics export that Calendar opens directly.</li>
+      <li>Habits gained a <strong>hand-entered practice log</strong> — day, hours and minutes. Practice you did away from your phone counts the same.</li>
+      <li>Fixed: a swiped-open row let the 5m button steal a tap meant for Delete, and the evening recap could appear over what you were doing.</li>
+    </ul>
+  </div>
+
+  <div class="rel">
+    <span class="tag">v21</span>
+    <h2>Reliability and recall</h2>
+    <ul>
+      <li>Reminders no longer depend on the app being awake at the exact minute; anything recently passed still fires.</li>
+      <li><strong>Backups</strong>: persistent-storage request, a local snapshot with restore, and a banner when your last export is over a week old.</li>
+      <li><strong>Recurring tasks</strong>, <strong>search</strong> across everything, and an <strong>archive</strong> so retiring a habit doesn't destroy its history.</li>
+      <li>Subtasks, effort tags, reduced-motion support, and screen-reader labels throughout.</li>
+    </ul>
+  </div>
+
+  <div class="rel">
+    <span class="tag">v20</span>
+    <h2>Twelve changes for ADHD brains, plus a tutorial</h2>
+    <ul>
+      <li>A <strong>5m start button</strong> on every task and an optional first-physical-step field.</li>
+      <li>An <strong>ambient time bar</strong> that drains toward your next block, and 5-minute warnings before a block starts and ends.</li>
+      <li><strong>Streak grace days</strong> — one free miss a week — and "showed up N of the last 30 days".</li>
+      <li><strong>Focus 3</strong>, automatic Someday parking, carry-forward, momentum queue, evening recap, multi-line paste, and a visible undo bar.</li>
+      <li>A seven-card tutorial on first run, skippable from the first frame.</li>
+    </ul>
+  </div>
+
+  <div class="rel">
+    <span class="tag">v19 and earlier</span>
+    <h2>The foundations</h2>
+    <ul>
+      <li>Today, Week, Habits, Routines, Chore timer, Assistant and Stats.</li>
+      <li>Triple alarms through the Clock app, routine timers, habit practice records, voice capture, eight accent colours, and JSON export/import.</li>
+      <li>A long fight with service-worker caching so that "Check for update" tells the truth.</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

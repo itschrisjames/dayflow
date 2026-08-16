@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 const APP_BUILT = '2026-08-16';
 
 /* ======================= Storage ======================= */
@@ -272,6 +272,7 @@ function blankState() {
       timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
       pushOn: false, pushServer: null, pushKey: null,
       lastExportAt: null, storagePersisted: null, keepAwake: true,
+      license: null, firstRunAt: null, supportDismissedAt: null,
     },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
@@ -284,6 +285,7 @@ const SETTING_DEFAULTS = {
   timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
   pushOn: false, pushServer: null, pushKey: null,
   lastExportAt: null, storagePersisted: null, keepAwake: true,
+  license: null, firstRunAt: null, supportDismissedAt: null,
 };
 
 /* ======================= State ======================= */
@@ -315,6 +317,9 @@ function ensureNewCollections(s) {
   (s.lists || []).forEach(l => { if (l.name === 'Errands') l.name = 'To Do List'; });
 
   if (!s.taskTimes) s.taskTimes = {};
+  // Needed to answer "how long have you actually been using this" before ever
+  // mentioning money.
+  if (!s.settings.firstRunAt) s.settings.firstRunAt = Date.now();
   if (!s.recurring) s.recurring = [];
   if (!s.calendar) s.calendar = null;
   (s.habits || []).forEach(h => { if (h.archived === undefined) h.archived = false; });
@@ -4072,6 +4077,7 @@ on('settingsBtn', 'click', () => {
   renderFlowToggles();
   renderPushRow();
   renderBackupRow();
+  renderSupporterRow();
   const chip = document.getElementById('versionChip');
   if (chip) chip.textContent = APP_VERSION;
   const note = document.getElementById('versionNote');
@@ -5581,6 +5587,148 @@ function restoreLiveTimer() {
    be taken again every time the app comes back with a timer still going. */
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && anyTimerRunning()) acquireWakeLock();
+});
+
+/* ======================= Supporters =======================
+   DayFlow has no server, so a key is a signed note rather than a lock: minted
+   offline with a private key, verified here against the public half below.
+   Nothing is gated behind it. A planner for people with ADHD that hides the
+   timer behind a paywall on the day they finally opened it is a planner they
+   delete — so every feature is free, and a key buys a thank-you and the end of
+   being asked. See tools/README.md for issuing them. */
+const LICENSE_PUBLIC_KEY = { x: 'B9_XOdk87kZnOWxNfWnerBq6y72hRmDZjGLza38_XGM', y: '-feiSWfD-u3ZlbubogeKsO_jIOcU96ymxAUWJsC75B0' };
+const SUPPORT_URL = 'https://example.gumroad.com/l/dayflow';   // ← your checkout page
+const FEEDBACK_EMAIL = 'you@example.com';                      // ← where feedback should land
+const NAG_AFTER_DAYS = 21;
+
+function b64uToBytes(s) {
+  const pad = '='.repeat((4 - s.length % 4) % 4);
+  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + pad);
+  return Uint8Array.from([...bin].map(c => c.charCodeAt(0)));
+}
+
+async function verifyLicense(raw) {
+  const parts = (raw || '').trim().split('.');
+  if (parts.length !== 3 || parts[0] !== 'DF1') return null;
+  try {
+    const key = await crypto.subtle.importKey(
+      'jwk',
+      { kty: 'EC', crv: 'P-256', x: LICENSE_PUBLIC_KEY.x, y: LICENSE_PUBLIC_KEY.y, ext: true },
+      { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    const data = b64uToBytes(parts[1]);
+    const sig = b64uToBytes(parts[2]);
+    const good = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, data);
+    if (!good) return null;
+    return JSON.parse(new TextDecoder().decode(data));
+  } catch (e) {
+    return null;
+  }
+}
+
+function isSupporter() { return !!(state.settings.license && state.settings.license.n); }
+
+function renderSupporterRow() {
+  const status = document.getElementById('supporterStatus');
+  const row = document.getElementById('supporterEnterRow');
+  const thanks = document.getElementById('supporterThanks');
+  if (!status) return;
+  if (isSupporter()) {
+    const l = state.settings.license;
+    status.textContent = `Supporter since ${l.d}. Thank you — genuinely.`;
+    if (row) row.hidden = true;
+    if (thanks) thanks.hidden = false;
+    document.getElementById('supporterName').textContent = l.n;
+  } else {
+    const days = Math.floor((Date.now() - (state.settings.firstRunAt || Date.now())) / 86400000);
+    status.textContent = `DayFlow is free and stays free — every feature, no trial, no account. If it has earned it after ${days} day${days === 1 ? '' : 's'}, you can chip in; a key just turns off the asking.`;
+    if (row) row.hidden = false;
+    if (thanks) thanks.hidden = true;
+  }
+  const nag = document.getElementById('supportNag');
+  if (nag) nag.hidden = !shouldAskForSupport();
+}
+
+function shouldAskForSupport() {
+  if (isSupporter()) return false;
+  if (state.settings.supportDismissedAt) {
+    // Asked and declined: leave it alone for a good long while.
+    if (Date.now() - state.settings.supportDismissedAt < 90 * 86400000) return false;
+  }
+  const age = Date.now() - (state.settings.firstRunAt || Date.now());
+  return age > NAG_AFTER_DAYS * 86400000 && hasRealData();
+}
+
+on('supporterApplyBtn', 'click', async () => {
+  const raw = document.getElementById('supporterKeyInput').value.trim();
+  if (!raw) return;
+  const lic = await verifyLicense(raw);
+  if (!lic) {
+    toast('That key didn’t check out — paste the whole thing, including DF1.', 5000);
+    return;
+  }
+  state.settings.license = lic;
+  saveState('silent');
+  document.getElementById('supporterKeyInput').value = '';
+  renderSupporterRow();
+  toast(`Thank you, ${lic.n}.`, 5000);
+});
+
+on('supportBuyBtn', 'click', () => window.open(SUPPORT_URL, '_blank', 'noopener'));
+on('supportNagBuyBtn', 'click', () => window.open(SUPPORT_URL, '_blank', 'noopener'));
+on('supportNagHideBtn', 'click', () => {
+  state.settings.supportDismissedAt = Date.now();
+  saveState('silent');
+  renderSupporterRow();
+  toast('Fair enough — I won’t bring it up again for a few months');
+});
+
+/* ======================= Feedback =======================
+   "It broke" with no version number is unactionable, so the report carries the
+   build, the platform and a count of what's in the app — never the contents. */
+function diagnosticsText() {
+  const nav = navigator.userAgent || '';
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  return [
+    `DayFlow ${APP_VERSION} (built ${APP_BUILT})`,
+    `Installed to Home Screen: ${standalone ? 'yes' : 'no'}`,
+    `Screen: ${window.innerWidth}×${window.innerHeight}`,
+    `Browser: ${nav}`,
+    `Tasks ${state.tasks.length} · habits ${state.habits.length} · routines ${state.routines.length} · chores ${state.chores.length}`,
+    `Reminders ${state.settings.remindersEnabled ? 'on' : 'off'} · calendar ${googleConnected() ? 'google' : (externalCount('apple') ? 'apple' : 'none')}`,
+  ].join('\n');
+}
+
+function feedbackMailto() {
+  const body = [
+    'What happened:',
+    '',
+    '',
+    'What you expected:',
+    '',
+    '',
+    '--- please leave this bit, it tells me where to look ---',
+    diagnosticsText(),
+  ].join('\n');
+  return `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('DayFlow feedback (' + APP_VERSION + ')')}&body=${encodeURIComponent(body)}`;
+}
+
+on('feedbackBtn', 'click', () => {
+  const a = document.createElement('a');
+  a.href = feedbackMailto();
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => a.remove(), 500);
+});
+
+on('copyDiagBtn', 'click', async () => {
+  const text = diagnosticsText();
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Details copied — paste them into your message');
+  } catch (e) {
+    toast(text, 8000);
+  }
 });
 
 /* ======================= Focus & flow controls ======================= */

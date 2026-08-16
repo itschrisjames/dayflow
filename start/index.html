@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DayFlow — a planner that works with an ADHD brain</title>
+<meta name="description" content="A free, private day planner built around starting rather than organising. Five-minute timers, forgiving streaks, and everything stored on your own phone.">
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17171a" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../icons/icon-192.png">
+
+<!-- Open Graph, so a link pasted into a message looks like something -->
+<meta property="og:title" content="DayFlow — a planner that works with an ADHD brain">
+<meta property="og:description" content="Free, private, and built around the hard part: starting.">
+<meta property="og:image" content="img/today.png">
+<meta property="og:type" content="website">
+
+<!--
+  ────────────────────────────────────────────────────────────────
+  BEFORE YOU SHARE THIS, EDIT THREE THINGS:
+    1. APP_URL below — your GitHub Pages address
+    2. the mailto: address in the Feedback section
+    3. the support link in the Support section (and SUPPORT_URL in js/app.js)
+  ────────────────────────────────────────────────────────────────
+-->
+
+<style>
+  :root {
+    --bg: #faf9f6; --bg-elev: #ffffff; --bg-sunken: #f1efe9;
+    --text: #1c1b19; --text-dim: #6f6b63; --text-faint: #a8a29a;
+    --border: #e6e2da; --accent: #ff8c42; --accent-text: #fff;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --bg-elev: #201f23; --bg-sunken: #131215;
+      --text: #f2f0ec; --text-dim: #a19c93; --text-faint: #6b675f;
+      --border: #2f2e32; --accent-text: #17171a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; line-height: 1.6;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 22px; }
+  header.hero { padding: 64px 0 40px; text-align: center; }
+  .mark {
+    width: 62px; height: 62px; border-radius: 18px; margin: 0 auto 22px;
+    background: var(--accent); color: var(--accent-text);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mark svg { width: 34px; height: 34px; }
+  h1 { font-size: clamp(34px, 7vw, 52px); line-height: 1.08; margin: 0 0 16px; letter-spacing: -0.03em; font-weight: 800; }
+  .tagline { font-size: clamp(17px, 2.4vw, 20px); color: var(--text-dim); max-width: 30ch; margin: 0 auto 30px; }
+  .cta {
+    display: inline-flex; align-items: center; gap: 9px;
+    background: var(--accent); color: var(--accent-text); text-decoration: none;
+    font-weight: 800; font-size: 17px; padding: 15px 30px; border-radius: 30px;
+  }
+  .cta:active { transform: scale(0.98); }
+  .cta-note { margin-top: 14px; font-size: 13.5px; color: var(--text-faint); }
+
+  section { padding: 44px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: clamp(22px, 3.4vw, 28px); margin: 0 0 8px; letter-spacing: -0.02em; font-weight: 800; }
+  .lede { color: var(--text-dim); margin: 0 0 26px; font-size: 16.5px; max-width: 58ch; }
+
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px; }
+  .shot { text-align: center; }
+  .shot img {
+    width: 100%; max-width: 260px; border-radius: 20px;
+    border: 1px solid var(--border); background: var(--bg-elev);
+  }
+  .shot figcaption { font-size: 13.5px; color: var(--text-dim); margin-top: 10px; }
+
+  .points { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .point { background: var(--bg-sunken); border-radius: var(--radius); padding: 18px 20px; }
+  .point h3 { margin: 0 0 6px; font-size: 16px; font-weight: 800; }
+  .point p { margin: 0; font-size: 14.5px; color: var(--text-dim); }
+
+  ol.install { counter-reset: step; list-style: none; padding: 0; margin: 0; max-width: 56ch; }
+  ol.install li {
+    counter-increment: step; position: relative;
+    padding: 0 0 20px 46px; font-size: 16px;
+  }
+  ol.install li::before {
+    content: counter(step); position: absolute; left: 0; top: -1px;
+    width: 30px; height: 30px; border-radius: 15px;
+    background: var(--accent); color: var(--accent-text);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800;
+  }
+  .inline-ico { display: inline-block; vertical-align: -4px; width: 18px; height: 18px; }
+  .url {
+    display: block; margin-top: 6px; padding: 12px 14px;
+    background: var(--bg-sunken); border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14px; word-break: break-all;
+  }
+  .honest { background: var(--bg-sunken); border-radius: var(--radius); padding: 20px 22px; }
+  .honest ul { margin: 0; padding-left: 20px; }
+  .honest li { font-size: 14.5px; color: var(--text-dim); margin-bottom: 10px; }
+  .honest li:last-child { margin-bottom: 0; }
+  .honest strong { color: var(--text); }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 22px; border-radius: 24px; text-decoration: none;
+    font-weight: 700; font-size: 15px;
+    background: var(--bg-sunken); color: var(--text); border: 1px solid var(--border);
+  }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+  footer { padding: 40px 0 60px; color: var(--text-faint); font-size: 13.5px; border-top: 1px solid var(--border); }
+  footer a { color: var(--text-dim); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/>
+      </svg>
+    </div>
+    <h1>Starting is the hard part.</h1>
+    <p class="tagline">DayFlow is a day planner built around that, for brains that find organising easier than beginning.</p>
+    <a class="cta" href="../">
+      Open DayFlow
+      <svg class="inline-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h15M13.5 5.5l6.5 6.5-6.5 6.5"/></svg>
+    </a>
+    <p class="cta-note">Free · no account · nothing leaves your phone</p>
+  </header>
+
+  <section>
+    <h2>Every task has a five-minute button</h2>
+    <p class="lede">One tap starts a timer. No scheduling first, no category, no estimate. The timer runs past five minutes rather than shouting at you, and it records how long the thing actually took — so next time DayFlow fills in the real number instead of your optimistic one.</p>
+    <div class="shots">
+      <figure class="shot"><img src="img/today.png" alt="DayFlow's Today screen, showing three inbox tasks each with a five-minute start button"><figcaption>Capture first. Organise never.</figcaption></figure>
+      <figure class="shot"><img src="img/start.png" alt="A five-minute countdown timer for the task Email the landlord"><figcaption>One tap and you've started.</figcaption></figure>
+      <figure class="shot"><img src="img/schedule.png" alt="An hourly schedule with a red line at the current time and a bar counting down to the next block"><figcaption>Time you can see, not count.</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Built for the specific ways this goes wrong</h2>
+    <div class="points">
+      <div class="point">
+        <h3>A missed day doesn't reset your streak</h3>
+        <p>One free miss a week. Every habit also shows how many of the last 30 days you turned up, so a bad Tuesday can't erase the month.</p>
+      </div>
+      <div class="point">
+        <h3>Focus 3</h3>
+        <p>One tap hides everything except three things. A forty-item inbox is the thing that makes people close the app.</p>
+      </div>
+      <div class="point">
+        <h3>Nothing goes stale in your face</h3>
+        <p>Anything untouched for three weeks steps aside into Someday on its own. Nothing is deleted, and nothing nags.</p>
+      </div>
+      <div class="point">
+        <h3>Warnings before, not at</h3>
+        <p>Five minutes before a block starts and five before it ends — being yanked out of something at the exact moment never works.</p>
+      </div>
+      <div class="point">
+        <h3>Momentum</h3>
+        <p>Finish one thing and the next is offered with a ten-second countdown and an easy out. That gap is where the hour goes.</p>
+      </div>
+      <div class="point">
+        <h3>Undo, always</h3>
+        <p>A labelled undo bar sits within thumb reach for twelve seconds after anything destructive. Impulsive taps are part of the territory.</p>
+      </div>
+    </div>
+    <div class="shots" style="margin-top:24px;">
+      <figure class="shot"><img src="img/habits.png" alt="A habit card showing a 16-day streak, a month calendar of completions, and practice records"><figcaption>Effort counted, not perfection.</figcaption></figure>
+      <figure class="shot"><img src="img/stats.png" alt="Stats screen in dark mode showing things done this week and days shown up"><figcaption>Stats that lead with what you did.</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Install it in twenty seconds</h2>
+    <p class="lede">DayFlow is a web app, so there's no App Store and no download. Adding it to your Home Screen makes it behave like any other app — full screen, works offline, its own icon.</p>
+    <ol class="install">
+      <li>
+        Open this address in <strong>Safari</strong> on your iPhone (Chrome on Android):
+        <code class="url" id="appUrl">https://itschrisjames.github.io/dayflow/</code>
+      </li>
+      <li>
+        Tap the <strong>Share</strong> button
+        <svg class="inline-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5V3.5"/><path d="m8 7.5 4-4 4 4"/><path d="M6 11.5H4.5v9h15v-9H18"/></svg>
+        at the bottom of Safari.
+      </li>
+      <li>Scroll down and tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+      <li>Open it from your Home Screen from now on — notifications and offline use only work from there, not from a Safari tab.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>What it doesn't do</h2>
+    <p class="lede">Worth knowing before you rely on it. I'd rather you find these here than three weeks in.</p>
+    <div class="honest">
+      <ul>
+        <li><strong>Your data lives on your phone only.</strong> No account, no server, nothing to leak — but clearing Safari's website data deletes it. DayFlow nags you to export a backup for exactly this reason.</li>
+        <li><strong>Reminders only appear while it's open</strong>, unless you run the small notification server included in the repo. iOS gives a web app no way to wake itself up.</li>
+        <li><strong>Clock alarms need a Shortcut</strong> you build once, because iOS has no alarm API. Calendar alerts work with no setup at all.</li>
+        <li><strong>The assistant is a pattern matcher</strong> running on your phone, not a language model. It understands a fixed set of phrasings and nothing you type reaches the internet.</li>
+        <li><strong>Google Calendar sync needs your own credential.</strong> Two-way sync works, but since there's no server, you supply a Google client ID — about three minutes, explained in the app.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tell me what's wrong with it</h2>
+    <p class="lede">This is early and I want the unflattering version. The most useful thing you can tell me is what you stopped using after a week, and why.</p>
+    <div class="btn-row">
+      <a class="btn primary" href="mailto:you@example.com?subject=DayFlow%20feedback">Email me</a>
+      <a class="btn" href="changelog.html">What's changed</a>
+    </div>
+  </section>
+
+  <section>
+    <h2>Support it</h2>
+    <p class="lede">DayFlow is free, and every feature stays free — no trial, no locked timer, no account. If it's genuinely helping, you can chip in, and a supporter key turns off the one place the app ever mentions money.</p>
+    <div class="btn-row">
+      <a class="btn primary" href="https://example.gumroad.com/l/dayflow">Chip in</a>
+    </div>
+  </section>
+
+  <footer>
+    <p>DayFlow stores everything in your browser on your device. It has no analytics, no accounts, no tracking, and makes no network requests except the ones you switch on yourself (calendar sync, notifications).</p>
+    <p>Not a medical device and not treatment. It's a planner built with ADHD in mind. <a href="../">Open the app</a></p>
+  </footer>
+
+</div>
+</body>
+</html>
