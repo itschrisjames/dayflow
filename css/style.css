@@ -1306,3 +1306,4 @@ button { font-family: inherit; }
   color: var(--accent); font-size: 13.5px; font-weight: 800;
 }
 .supporter-badge .ico { width: 16px; height: 16px; }
+.notes-input { min-height: 76px; resize: vertical; line-height: 1.5; font-family: inherit; }

@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 const APP_BUILT = '2026-08-16';
 
 /* ======================= Storage ======================= */
@@ -1004,6 +1004,8 @@ function openBlockSheet(t, opts = {}) {
     t.startMin != null ? minToTimeInput(t.startMin)
     : (t.proposedMin != null ? minToTimeInput(t.proposedMin) : '');
   document.getElementById('blockStepInput').value = t.firstStep || '';
+  const notesEl = document.getElementById('blockNotesInput');
+  if (notesEl) notesEl.value = t.notes || '';
 
   // Prefill from evidence. Once a task title has been timed, its real median
   // beats whatever number was guessed the first time — unless the user has
@@ -1110,6 +1112,8 @@ on('blockSaveBtn', 'click', () => {
   activeBlock.urgency = currentUrgency;
   const step = document.getElementById('blockStepInput').value.trim();
   if (step) activeBlock.firstStep = step; else delete activeBlock.firstStep;
+  const notesVal = (document.getElementById('blockNotesInput') || {}).value;
+  if (notesVal && notesVal.trim()) activeBlock.notes = notesVal.trim(); else delete activeBlock.notes;
   activeBlock.energy = currentEnergy;
   activeBlock.subtasks = currentSubtasks;
   upsertRuleFromTask(activeBlock, currentRepeat);
@@ -4530,29 +4534,280 @@ on('backupRestoreBtn', 'click', () => {
 
 on('exportBtn', 'click', exportBackup);
 
+/* ======================= Importing other people's files =======================
+   The old importer accepted exactly one shape — a full DayFlow backup — and
+   answered everything else with "invalid file". That is a terrible response to
+   a perfectly reasonable content calendar, a spreadsheet export, or anything
+   an AI wrote for you. It now takes a backup, a bare list of items, or a CSV,
+   guesses which columns mean what, shows you what it found, and *adds* rather
+   than replacing, so a bad guess costs you nothing. */
+
+// Field names people and tools actually use, in preference order.
+const IMPORT_FIELDS = {
+  title: ['title', 'name', 'task', 'post', 'topic', 'subject', 'headline', 'summary', 'event', 'item', 'label', 'text', 'content', 'caption', 'description'],
+  date: ['date', 'day', 'publishdate', 'publish_date', 'scheduleddate', 'scheduled_date', 'scheduledfor', 'scheduled_for', 'due', 'duedate', 'due_date', 'when', 'start', 'startdate', 'start_date', 'datetime', 'start_time', 'starttime', 'postdate', 'post_date'],
+  time: ['time', 'starttime', 'start_time', 'attime', 'at', 'posttime', 'post_time', 'scheduledtime', 'scheduled_time'],
+  duration: ['duration', 'durationmin', 'duration_min', 'minutes', 'mins', 'length', 'estimate', 'estimatedminutes'],
+  notes: ['notes', 'note', 'description', 'details', 'body', 'copy', 'caption', 'content', 'script', 'hook', 'cta', 'hashtags', 'platform', 'channel', 'format', 'pillar', 'category', 'status'],
+  priority: ['priority', 'urgency', 'importance'],
+};
+
+function pick(obj, names) {
+  const lower = {};
+  Object.keys(obj || {}).forEach(k => { lower[k.toLowerCase().replace(/[\s-]/g, '_')] = obj[k]; });
+  for (const n of names) {
+    const v = lower[n] ?? lower[n.replace(/_/g, '')];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return { key: n, value: v };
+  }
+  return null;
+}
+
+// Accepts 2026-08-16, 16/08/2026, "Aug 16", "August 16 2026", ISO datetimes.
+function coerceDate(v) {
+  if (v == null) return null;
+  const str = String(v).trim();
+  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = str.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/);
+  if (m) {
+    // Day-first unless the first number can't be a day.
+    let [, a, b, y] = m;
+    if (y.length === 2) y = '20' + y;
+    const day = +a > 12 ? +a : +a, mon = +a > 12 ? +b : +b;
+    return `${y}-${pad2(mon)}-${pad2(day)}`;
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    // A bare "Aug 16" parses to year 2001 in some engines; assume this year.
+    if (d.getFullYear() < 2015) d.setFullYear(new Date().getFullYear());
+    return dateStr(d);
+  }
+  return null;
+}
+
+// "14:30", "2:30pm", "2pm", or the time half of an ISO stamp.
+function coerceTime(v) {
+  if (v == null) return null;
+  const str = String(v).trim();
+  let m = str.match(/T(\d{2}):(\d{2})/);
+  if (m) return (+m[1]) * 60 + (+m[2]);
+  m = str.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (m) {
+    let h = +m[1];
+    const min = +(m[2] || 0);
+    const ap = (m[3] || '').toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    if (h > 23 || min > 59) return null;
+    // A bare number with no am/pm and no colon is more likely a duration.
+    if (!m[2] && !ap) return null;
+    return h * 60 + min;
+  }
+  return null;
+}
+
+function normalizeImportItem(o) {
+  if (typeof o === 'string') {
+    const t = o.trim();
+    return t ? { title: t.slice(0, 140), date: null, startMin: null, durationMin: 30, notes: '' } : null;
+  }
+  if (!o || typeof o !== 'object') return null;
+
+  const titleHit = pick(o, IMPORT_FIELDS.title);
+  if (!titleHit) return null;
+  let title = String(titleHit.value).replace(/\s+/g, ' ').trim();
+  let overflow = '';
+  if (title.length > 90) { overflow = title; title = title.slice(0, 87).trimEnd() + '…'; }
+
+  const dateHit = pick(o, IMPORT_FIELDS.date);
+  const date = dateHit ? coerceDate(dateHit.value) : null;
+
+  const timeHit = pick(o, IMPORT_FIELDS.time);
+  let startMin = timeHit ? coerceTime(timeHit.value) : null;
+  if (startMin == null && dateHit) startMin = coerceTime(dateHit.value);
+
+  const durHit = pick(o, IMPORT_FIELDS.duration);
+  const durationMin = durHit ? Math.max(5, Math.round(parseFloat(durHit.value) || 30)) : 30;
+
+  // Everything else worth keeping becomes notes, so nothing is silently lost.
+  const noteBits = [];
+  if (overflow) noteBits.push(overflow);
+  Object.keys(o).forEach(k => {
+    const key = k.toLowerCase().replace(/[\s-]/g, '_');
+    if (!IMPORT_FIELDS.notes.includes(key)) return;
+    if (titleHit && key === titleHit.key) return;
+    const v = o[k];
+    if (v == null || String(v).trim() === '') return;
+    const val = Array.isArray(v) ? v.join(', ') : String(v).trim();
+    noteBits.push(`${k}: ${val}`);
+  });
+
+  const prioHit = pick(o, IMPORT_FIELDS.priority);
+  const prio = prioHit ? String(prioHit.value).toLowerCase() : '';
+  const urgency = /urgent|asap|high|p1/.test(prio) ? 'asap'
+    : /today/.test(prio) ? 'today'
+    : /medium|p2|week/.test(prio) ? 'week'
+    : /low|p3|month/.test(prio) ? 'month' : null;
+
+  return { title, date, startMin, durationMin, notes: noteBits.join('\n'), urgency };
+}
+
+/* A small CSV reader: quoted fields, embedded commas and newlines, doubled
+   quotes. Enough for anything a spreadsheet or an AI hands you. */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  const src = text.replace(/\r\n/g, '\n');
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  if (!rows.length) return [];
+
+  const headers = rows[0].map(h => h.trim());
+  return rows.slice(1)
+    .filter(r => r.some(c => c.trim() !== ''))
+    .map(r => {
+      const o = {};
+      headers.forEach((h, i) => { o[h] = (r[i] || '').trim(); });
+      return o;
+    });
+}
+
+/* Finds the list inside whatever wrapper it arrived in — {posts:[…]},
+   {data:{items:[…]}}, or a bare array. */
+function findItemArray(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return null;
+  const named = ['items', 'posts', 'events', 'tasks', 'entries', 'rows', 'schedule', 'calendar', 'data', 'content'];
+  for (const k of named) {
+    if (Array.isArray(data[k])) return data[k];
+    if (data[k] && typeof data[k] === 'object') {
+      const inner = findItemArray(data[k]);
+      if (inner) return inner;
+    }
+  }
+  const arrays = Object.values(data).filter(Array.isArray);
+  return arrays.length === 1 ? arrays[0] : null;
+}
+
+let pendingImport = [];
+
+function renderImportPreview() {
+  const wrap = document.getElementById('importPreview');
+  const dated = pendingImport.filter(i => i.date).length;
+  const timed = pendingImport.filter(i => i.startMin != null).length;
+  document.getElementById('importSummary').innerHTML =
+    `<strong>${pendingImport.length}</strong> item${pendingImport.length === 1 ? '' : 's'} · ` +
+    `${dated} with a date · ${timed} with a time. ` +
+    `Anything undated lands in your inbox, and nothing you already have is touched.`;
+  wrap.innerHTML = '';
+  pendingImport.slice(0, 6).forEach(i => {
+    const row = document.createElement('div');
+    row.className = 'someday-row';
+    const when = i.date ? (i.startMin != null ? `${i.date} · ${minToLabel(i.startMin)}` : i.date) : 'no date — inbox';
+    row.innerHTML = `<span class="sd-title">${escapeHtml(i.title)}<span class="rule-sub">${escapeHtml(when)}</span></span>`;
+    wrap.appendChild(row);
+  });
+  if (pendingImport.length > 6) {
+    const more = document.createElement('p');
+    more.className = 'settings-note';
+    more.style.cssText = 'text-align:left;margin:2px 0 0;';
+    more.textContent = `…and ${pendingImport.length - 6} more.`;
+    wrap.appendChild(more);
+  }
+  document.getElementById('importAddBtn').textContent = `Add ${pendingImport.length} to DayFlow`;
+}
+
+on('importAddBtn', 'click', () => {
+  if (!pendingImport.length) return;
+  const now = Date.now();
+  pendingImport.forEach((i, idx) => {
+    state.tasks.push({
+      id: uid(),
+      title: i.title,
+      date: i.date,
+      startMin: i.startMin,
+      durationMin: i.durationMin || 30,
+      urgency: i.urgency || null,
+      notes: i.notes || undefined,
+      done: false, someday: false, subtasks: [],
+      createdAt: now + idx, touchedAt: now,
+    });
+  });
+  const n = pendingImport.length;
+  pendingImport = [];
+  saveState('importing a file');
+  closeSheets();
+  renderAll();
+  toast(`${n} item${n === 1 ? '' : 's'} added — undo is in the top bar if that went wrong`, 5000);
+});
+on('importCancelBtn', 'click', () => { pendingImport = []; closeSheets(); });
+
+function restoreBackup(data) {
+  state = data;
+  if (!state.view) state.view = { current: 'today', todayOffset: 0, weekOffset: 0 };
+  if (!state.routines) state.routines = [];
+  if (!state.chores) state.chores = [];
+  if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' };
+  if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
+  if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
+  ensureHabitSessions(state);
+  ensureNewCollections(state);
+  saveState('restoring a backup');
+  applyTheme();
+  closeSheets();
+  renderAll();
+  toast('Backup restored');
+}
+
 on('importFile', 'change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  const isCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
   const reader = new FileReader();
   reader.onload = () => {
+    const text = String(reader.result || '');
     try {
-      const data = JSON.parse(reader.result);
-      if (!data.tasks || !data.habits) throw new Error('bad format');
-      state = data;
-      if (!state.view) state.view = { current: 'today', todayOffset: 0, weekOffset: 0 };
-      if (!state.routines) state.routines = [];
-      if (!state.chores) state.chores = [];
-      if (!state.settings) state.settings = { theme: 'auto', remindersEnabled: false, colorScheme: 'orange' };
-      if (state.settings.remindersEnabled === undefined) state.settings.remindersEnabled = false;
-      if (!state.settings.colorScheme) state.settings.colorScheme = 'orange';
-      ensureHabitSessions(state);
-      ensureNewCollections(state);
-      saveState();
-      applyTheme();
-      renderAll();
-      toast('Imported');
+      let raw;
+      if (isCsv) {
+        raw = parseCsv(text);
+      } else {
+        raw = JSON.parse(text);
+        // A full DayFlow backup replaces everything; anything else is merged.
+        if (raw && raw.tasks && raw.habits && raw.settings) {
+          if (!confirm('This is a DayFlow backup. Restoring it replaces everything currently in the app. Continue?')) return;
+          restoreBackup(raw);
+          return;
+        }
+        const list = findItemArray(raw);
+        raw = list || (typeof raw === 'object' ? [raw] : null);
+      }
+
+      if (!Array.isArray(raw) || !raw.length) {
+        toast('I couldn’t find a list of items in that file. A JSON array, or a CSV with a header row, both work.', 7000);
+        return;
+      }
+
+      pendingImport = raw.map(normalizeImportItem).filter(Boolean);
+      if (!pendingImport.length) {
+        toast('Found the list, but no row had anything I could read as a title. Name that column "title".', 7000);
+        return;
+      }
+      renderImportPreview();
+      openSheet('importSheet');
     } catch (err) {
-      toast('Import failed — invalid file');
+      console.warn('[DayFlow] import', err);
+      toast(isCsv ? 'That CSV couldn’t be read.' : 'That file isn’t valid JSON — check it opens in a text editor without errors.', 6000);
     }
   };
   reader.readAsText(file);
@@ -4734,7 +4989,7 @@ function searchEverything(q) {
   const match = (s) => (s || '').toLowerCase().includes(needle);
 
   state.tasks.forEach(t => {
-    if (!match(t.title) && !(t.subtasks || []).some(st => match(st.text))) return;
+    if (!match(t.title) && !match(t.notes) && !(t.subtasks || []).some(st => match(st.text))) return;
     const where = t.someday ? 'Someday' : t.done ? 'Done' : t.startMin != null ? `Scheduled ${minToLabel(t.startMin)}` : 'Inbox';
     hits.push({ kind: 'task', id: t.id, title: t.title, sub: `${where}${t.date ? ' · ' + t.date : ''}`, obj: t });
   });

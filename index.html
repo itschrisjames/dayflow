@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=24">
+<link rel="stylesheet" href="css/style.css?v=25">
 </head>
 <body>
 
@@ -218,6 +218,10 @@
     <div class="sheet-row freq-row">
       <label>Repeat</label>
       <div class="freq-options repeat-options" id="repeatOptions"></div>
+    </div>
+    <div class="subtask-block">
+      <div class="section-label" style="padding-left:0">Notes</div>
+      <textarea id="blockNotesInput" class="sheet-input notes-input" rows="3" placeholder="Anything that needs to travel with this — copy, links, context…" maxlength="4000"></textarea>
     </div>
     <div class="subtask-block">
       <div class="section-label" style="padding-left:0">Steps</div>
@@ -676,6 +680,19 @@
   </div>
 </div>
 
+<div id="importSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Import these?</h2>
+    <p class="settings-note" id="importSummary" style="text-align:left;margin:0 0 12px;"></p>
+    <div id="importPreview"></div>
+    <div class="sheet-actions">
+      <button type="button" id="importCancelBtn" class="pill-btn">Cancel</button>
+    </div>
+    <button id="importAddBtn" class="primary-btn">Add to DayFlow</button>
+  </div>
+</div>
+
 <div id="settingsSheet" class="sheet" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
@@ -742,14 +759,15 @@
     <div class="section-label" style="padding-left:0;margin-top:6px;">Your data</div>
     <div class="sheet-actions">
       <button id="exportBtn" class="pill-btn accent">Export JSON</button>
-      <label class="pill-btn" for="importFile">Import JSON</label>
-      <input type="file" id="importFile" accept="application/json" hidden>
+      <label class="pill-btn" for="importFile">Import file</label>
+      <input type="file" id="importFile" accept=".json,.csv,application/json,text/csv" hidden>
     </div>
     <div class="sheet-actions">
       <button id="backupSnapshotBtn" class="pill-btn">Save local snapshot</button>
       <button id="backupRestoreBtn" class="pill-btn">Restore snapshot</button>
     </div>
     <p class="settings-note" id="backupNote" style="text-align:left;margin:2px 0 0;"></p>
+    <p class="settings-note" style="text-align:left;margin:6px 0 0;">Import takes a DayFlow backup, a JSON list of items, or a CSV with a header row — a content calendar, a schedule, anything with titles and dates. You see what it found before anything is added.</p>
     <div class="sheet-actions">
       <button id="repeatManageBtn" class="pill-btn">Repeating tasks</button>
       <button id="archiveBtn" class="pill-btn">Archive</button>
@@ -807,6 +825,6 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/app.js?v=24"></script>
+<script src="js/app.js?v=25"></script>
 </body>
 </html>
