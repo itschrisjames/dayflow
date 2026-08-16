@@ -29,8 +29,8 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v22';
-const APP_BUILT = '2026-08-15';
+const APP_VERSION = 'v23';
+const APP_BUILT = '2026-08-16';
 
 /* ======================= Storage ======================= */
 const STORE_KEY = 'dayflow.v1';
@@ -271,7 +271,7 @@ function blankState() {
       graceDays: true, transitionWarn: true, momentum: true, autoDecay: true,
       timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
       pushOn: false, pushServer: null, pushKey: null,
-      lastExportAt: null, storagePersisted: null,
+      lastExportAt: null, storagePersisted: null, keepAwake: true,
     },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
@@ -283,7 +283,7 @@ const SETTING_DEFAULTS = {
   graceDays: true, transitionWarn: true, momentum: true, autoDecay: true,
   timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
   pushOn: false, pushServer: null, pushKey: null,
-  lastExportAt: null, storagePersisted: null,
+  lastExportAt: null, storagePersisted: null, keepAwake: true,
 };
 
 /* ======================= State ======================= */
@@ -1236,12 +1236,14 @@ let momentumTimer = null;
 
 function taskRunEl(id) { return document.getElementById(id); }
 
-function startTaskTimer(t, goalMin) {
+function startTaskTimer(t, goalMin, opts = {}) {
   if (!t) return;
   clearInterval(taskRun && taskRun.interval);
   clearInterval(momentumTimer);
   const goalSec = Math.max(60, Math.round((goalMin || START_SMALL_MIN) * 60));
-  taskRun = { task: t, goalSec, startTs: Date.now(), interval: null };
+  taskRun = { task: t, goalSec, startTs: opts.resumeTs || Date.now(), interval: null };
+  saveLiveTimer({ kind: 'task', id: t.id, startTs: taskRun.startTs, goalSec });
+  acquireWakeLock();
 
   taskRunEl('taskRunName').textContent = t.title;
   const stepEl = taskRunEl('taskRunStep');
@@ -1282,6 +1284,7 @@ function taskRunTick() {
 function endTaskRun(markDone) {
   if (!taskRun) return null;
   clearInterval(taskRun.interval);
+  clearLiveTimer();
   const { task, goalSec } = taskRun;
   const elapsed = Math.round((Date.now() - taskRun.startTs) / 1000);
   taskRun = null;
@@ -1343,6 +1346,8 @@ function closeTaskRun() {
   clearInterval(momentumTimer);
   if (taskRun) clearInterval(taskRun.interval);
   taskRun = null;
+  clearLiveTimer();
+  if (!anyTimerRunning()) releaseWakeLock();
   const ov = taskRunEl('taskRunOverlay');
   if (ov) ov.hidden = true;
   const nx = taskRunEl('taskRunNext');
@@ -2694,14 +2699,31 @@ const RING_CIRC = 565.48;
 
 function stepSeconds(step) { return Math.max(1, (step && step.seconds) || 1); }
 
-function startRoutine(r) {
+function startRoutine(r, resume) {
   runRoutine = r;
-  runIndex = 0;
-  runStartTime = Date.now();
+  runIndex = resume ? resume.index : 0;
+  runStartTime = resume ? resume.startTs : Date.now();
+  acquireWakeLock();
   document.getElementById('runDone').hidden = true;
   document.getElementById('runBody').hidden = false;
   document.getElementById('routineRunOverlay').hidden = false;
-  loadRunStep();
+  if (resume) {
+    runPaused = false;
+    document.getElementById('runPauseBtn').textContent = 'Pause';
+    runStepEndsAt = resume.stepEndsAt;
+    paintRunStep();
+    clearInterval(runInterval);
+    runTick();                                   // rolls forward through any steps that elapsed
+    runInterval = setInterval(runTick, 250);
+    persistRoutineTimer();
+  } else {
+    loadRunStep();
+  }
+}
+
+function persistRoutineTimer() {
+  if (!runRoutine) return;
+  saveLiveTimer({ kind: 'routine', id: runRoutine.id, index: runIndex, stepEndsAt: runStepEndsAt, startTs: runStartTime });
 }
 
 function loadRunStep() {
@@ -2713,6 +2735,7 @@ function loadRunStep() {
   runRemaining = stepSeconds(step);
   paintRunStep();
   updateRunRing(stepSeconds(step));
+  persistRoutineTimer();
   runInterval = setInterval(runTick, 250);
 }
 
@@ -2758,6 +2781,7 @@ function runTick() {
     left = (runStepEndsAt - Date.now()) / 1000;
   }
   if (skipped) {
+    persistRoutineTimer();
     paintRunStep();
     if (skipped > 1) toast(`${skipped} steps ran while the screen was off`, 3000);
   }
@@ -2776,6 +2800,8 @@ function advanceRunStep() {
 
 function finishRun() {
   clearInterval(runInterval);
+  clearLiveTimer();
+  if (!anyTimerRunning()) releaseWakeLock();
   const elapsed = Math.round((Date.now() - runStartTime) / 1000);
   document.getElementById('runBody').hidden = true;
   document.getElementById('runDone').hidden = false;
@@ -2791,6 +2817,7 @@ on('runPauseBtn', 'click', () => {
   } else {
     runStepEndsAt = Date.now() + runPausedLeft;   // the deadline moves, not the clock
   }
+  persistRoutineTimer();
 });
 
 on('runPrevBtn', 'click', () => {
@@ -2803,10 +2830,14 @@ on('runNextBtn', 'click', () => {
 on('runCloseBtn', 'click', () => {
   clearInterval(runInterval);
   runRoutine = null;
+  clearLiveTimer();
+  if (!anyTimerRunning()) releaseWakeLock();
   document.getElementById('routineRunOverlay').hidden = true;
 });
 on('runFinishBtn', 'click', () => {
   runRoutine = null;
+  clearLiveTimer();
+  if (!anyTimerRunning()) releaseWakeLock();
   document.getElementById('routineRunOverlay').hidden = true;
 });
 
@@ -2880,16 +2911,18 @@ function addChoreFromInput() {
 
 let choreRunning = null, choreStartTs = 0, choreInterval = null;
 
-function startChoreTimer(c) {
+function startChoreTimer(c, resumeTs) {
   choreRunning = c;
-  choreStartTs = Date.now();
+  choreStartTs = resumeTs || Date.now();
+  saveLiveTimer({ kind: 'chore', id: c.id, startTs: choreStartTs });
+  acquireWakeLock();
   document.getElementById('choreRunName').textContent = c.name;
   const avg = choreAverage(c);
   document.getElementById('choreAvgLine').innerHTML = avg != null
     ? `Your average: <span class="avg-val">${fmtMinSec(avg)}</span>`
     : `First time timing this — let's set a baseline`;
-  document.getElementById('choreStopwatchNum').textContent = '0:00';
   document.getElementById('choreRunOverlay').hidden = false;
+  choreTick();
   clearInterval(choreInterval);
   choreInterval = setInterval(choreTick, 1000);
 }
@@ -2901,6 +2934,7 @@ function choreTick() {
 
 function stopChoreTimer(save) {
   clearInterval(choreInterval);
+  clearLiveTimer();
   const elapsed = Math.round((Date.now() - choreStartTs) / 1000);
   document.getElementById('choreRunOverlay').hidden = true;
   if (save && choreRunning && elapsed >= 3) {
@@ -2917,6 +2951,7 @@ function stopChoreTimer(save) {
     }
   }
   choreRunning = null;
+  if (!anyTimerRunning()) releaseWakeLock();
 }
 
 on('choreDoneBtn', 'click', () => stopChoreTimer(true));
@@ -3216,18 +3251,65 @@ on('alarmCreateBtn', 'click', () => {
 });
 
 /* ======================= Habit timer ======================= */
+/* ======================= Running timers survive anything =======================
+   Locking the screen doesn't pause a timer — it can destroy it. iOS freezes a
+   web app in the background and will discard the page entirely to reclaim
+   memory, so coming back means a cold start with every in-memory variable
+   gone: the overlay vanished and the session was never logged. Elapsed time
+   was already derived from a timestamp, which fixed the *display* but not the
+   disappearance.
+
+   So a running timer is written to storage the moment it starts, and restored
+   on launch. It also asks to keep the screen awake, which stops the whole
+   situation arising for a session you're watching. */
+const LIVE_TIMER_KEY = 'dayflow.timer';
+const LIVE_TIMER_MAX_MS = 6 * 3600 * 1000;   // beyond this it's a forgotten timer, not a session
+
+function saveLiveTimer(obj) {
+  try { localStorage.setItem(LIVE_TIMER_KEY, JSON.stringify(obj)); } catch (e) { /* non-fatal */ }
+}
+function clearLiveTimer() {
+  try { localStorage.removeItem(LIVE_TIMER_KEY); } catch (e) { /* non-fatal */ }
+}
+function readLiveTimer() {
+  try { return JSON.parse(localStorage.getItem(LIVE_TIMER_KEY) || 'null'); } catch (e) { return null; }
+}
+
+/* Screen Wake Lock: supported in iOS Safari 16.4+ for installed web apps. It
+   is a request, not a guarantee — the OS can refuse or drop it — so it is a
+   convenience layered on top of the restore logic, never a substitute. */
+let wakeLock = null;
+async function acquireWakeLock() {
+  if (state.settings.keepAwake === false) return;
+  if (!('wakeLock' in navigator)) return;
+  if (wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (e) { wakeLock = null; }
+}
+function releaseWakeLock() {
+  try { if (wakeLock) wakeLock.release(); } catch (e) { /* ignore */ }
+  wakeLock = null;
+}
+function anyTimerRunning() {
+  return !!(habitTimerRunning || choreRunning || (typeof taskRun !== 'undefined' && taskRun) || runRoutine);
+}
+
 let habitTimerRunning = null, habitTimerStartTs = 0, habitTimerInterval = null;
 
-function startHabitTimer(h) {
+function startHabitTimer(h, resumeTs) {
   habitTimerRunning = h;
-  habitTimerStartTs = Date.now();
+  habitTimerStartTs = resumeTs || Date.now();
+  saveLiveTimer({ kind: 'habit', id: h.id, startTs: habitTimerStartTs });
+  acquireWakeLock();
   document.getElementById('habitRunName').textContent = h.name;
   const pr = habitPR(h);
   document.getElementById('habitAvgLine').innerHTML = pr != null
     ? `Personal best: <span class="avg-val">${fmtMinSec(pr)}</span>`
     : `First timed session — let's set a record`;
-  document.getElementById('habitStopwatchNum').textContent = '0:00';
   document.getElementById('habitRunOverlay').hidden = false;
+  habitTimerTick();
   clearInterval(habitTimerInterval);
   habitTimerInterval = setInterval(habitTimerTick, 1000);
 }
@@ -3239,6 +3321,7 @@ function habitTimerTick() {
 
 function stopHabitTimer(save) {
   clearInterval(habitTimerInterval);
+  clearLiveTimer();
   const elapsed = Math.round((Date.now() - habitTimerStartTs) / 1000);
   document.getElementById('habitRunOverlay').hidden = true;
   if (save && habitTimerRunning && elapsed >= 3) {
@@ -3260,6 +3343,7 @@ function stopHabitTimer(save) {
     renderAll();
   }
   habitTimerRunning = null;
+  if (!anyTimerRunning()) releaseWakeLock();
 }
 
 on('habitDoneRunBtn', 'click', () => stopHabitTimer(true));
@@ -5439,6 +5523,66 @@ on('icsImportFile', 'change', (e) => {
   e.target.value = '';
 });
 
+/* ======================= Restoring a timer after a cold start =======================
+   The app can be killed between one glance at the screen and the next. When it
+   comes back, the timer that was running is picked up mid-flight rather than
+   silently forgotten — the elapsed time is real, because it was always
+   measured from a stored timestamp rather than counted in memory. */
+function restoreLiveTimer() {
+  const live = readLiveTimer();
+  if (!live || !live.startTs) return false;
+
+  const age = Date.now() - live.startTs;
+  if (age > LIVE_TIMER_MAX_MS) {
+    // A timer left running overnight is not a session anybody wants logged.
+    clearLiveTimer();
+    setTimeout(() => toast('A timer had been running for hours — I left it unlogged rather than guess', 6000), 1200);
+    return false;
+  }
+
+  const secs = Math.round(age / 1000);
+  const note = (what) => setTimeout(() =>
+    toast(`${what} was still running — ${fmtMinSec(secs)} so far`, 5000), 900);
+
+  if (live.kind === 'habit') {
+    const h = state.habits.find(x => x.id === live.id);
+    if (!h) { clearLiveTimer(); return false; }
+    startHabitTimer(h, live.startTs);
+    note(`“${h.name}”`);
+    return true;
+  }
+  if (live.kind === 'chore') {
+    const c = state.chores.find(x => x.id === live.id);
+    if (!c) { clearLiveTimer(); return false; }
+    startChoreTimer(c, live.startTs);
+    note(`“${c.name}”`);
+    return true;
+  }
+  if (live.kind === 'task') {
+    const t = state.tasks.find(x => x.id === live.id);
+    if (!t) { clearLiveTimer(); return false; }
+    startTaskTimer(t, Math.round((live.goalSec || 300) / 60), { resumeTs: live.startTs });
+    note(`“${t.title}”`);
+    return true;
+  }
+  if (live.kind === 'routine') {
+    const r = state.routines.find(x => x.id === live.id);
+    if (!r || !r.steps || !r.steps.length) { clearLiveTimer(); return false; }
+    const index = Math.min(live.index || 0, r.steps.length - 1);
+    startRoutine(r, { index, stepEndsAt: live.stepEndsAt || Date.now(), startTs: live.startTs });
+    note(`“${r.name}”`);
+    return true;
+  }
+  clearLiveTimer();
+  return false;
+}
+
+/* A wake lock is dropped whenever the page is hidden, by design — so it has to
+   be taken again every time the app comes back with a timer still going. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && anyTimerRunning()) acquireWakeLock();
+});
+
 /* ======================= Focus & flow controls ======================= */
 on('focusBtn', 'click', () => {
   state.settings.focusMode = !state.settings.focusMode;
@@ -5463,6 +5607,7 @@ const FLOW_TOGGLES = [
   ['momentumToggle', 'momentum'],
   ['timeBarToggle', 'timeBar'],
   ['decayToggle', 'autoDecay'],
+  ['keepAwakeToggle', 'keepAwake'],
 ];
 
 function renderFlowToggles() {
@@ -5479,6 +5624,10 @@ FLOW_TOGGLES.forEach(([id, key]) => {
   on(id, 'click', () => {
     state.settings[key] = state.settings[key] === false;
     saveState('silent');
+    if (key === 'keepAwake') {
+      if (state.settings.keepAwake && anyTimerRunning()) acquireWakeLock();
+      else releaseWakeLock();
+    }
     renderFlowToggles();
     renderAll();
   });
@@ -5760,9 +5909,13 @@ if (STALE_MOVED) {
   setTimeout(() => toast(`${STALE_MOVED} stale task${STALE_MOVED === 1 ? '' : 's'} moved to Someday — still there if you want them`, 5000), 900);
 }
 
+// A timer that was running when the app was killed comes back first — before
+// the tour or the recap could put a sheet over the top of it.
+const TIMER_RESTORED = restoreLiveTimer();
+
 // First run gets the tour. Anything else — an update, a returning user — does
 // not, because being re-onboarded by an app you already use is infuriating.
-if (!state.settings.tutorialSeen && !ALARM_RESULT && !CAME_FROM_UPDATE) {
+if (!state.settings.tutorialSeen && !ALARM_RESULT && !CAME_FROM_UPDATE && !TIMER_RESTORED) {
   setTimeout(openTour, 350);
 }
 
