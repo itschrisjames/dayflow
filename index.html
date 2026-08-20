@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=25">
+<link rel="stylesheet" href="css/style.css?v=26">
 </head>
 <body>
 
@@ -56,7 +56,10 @@
         </div>
         <div id="inboxList" class="inbox-list"></div>
         <div id="focusNote" class="focus-note" hidden></div>
-        <div id="somedayRow" class="someday-row-wrap" hidden>
+          <div id="autoRow" class="auto-row" hidden>
+          <button type="button" id="autoBtn" class="auto-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/><path d="m9 15 2 2 4-4"/></svg><span>Schedule my day</span></button>
+        </div>
+      <div id="somedayRow" class="someday-row-wrap" hidden>
           <button type="button" id="somedayBtn" class="someday-btn">Someday</button>
         </div>
       </div>
@@ -714,6 +717,29 @@
       <button id="pushSetupBtn" class="pill-btn">Set up push server</button>
     </div>
 
+    <div class="section-label" style="padding-left:0;margin-top:6px;">Working hours</div>
+    <div class="sheet-row">
+      <label for="workStartInput">Start</label>
+      <input id="workStartInput" type="time" step="900">
+    </div>
+    <div class="sheet-row">
+      <label for="workEndInput">End</label>
+      <input id="workEndInput" type="time" step="900">
+    </div>
+    <div class="sheet-row">
+      <label>Days</label>
+      <div class="day-chips" id="workDays"></div>
+    </div>
+    <div class="sheet-row">
+      <label>Gap between tasks</label>
+      <button type="button" id="gapBtn" class="freq-opt toggle-opt">10 min</button>
+    </div>
+    <div class="sheet-row">
+      <label>Schedule new tasks for me</label>
+      <button type="button" id="autoScheduleToggle" class="freq-opt toggle-opt">Off</button>
+    </div>
+    <p class="settings-note" id="workNote" style="text-align:left;margin:2px 0 0;"></p>
+
     <div class="section-label" style="padding-left:0;margin-top:6px;">Focus &amp; flow</div>
     <div class="sheet-row">
       <label>Streak grace day</label>
@@ -825,6 +851,6 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/app.js?v=25"></script>
+<script src="js/app.js?v=26"></script>
 </body>
 </html>

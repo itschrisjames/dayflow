@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v26';
 const APP_BUILT = '2026-08-16';
 
 /* ======================= Storage ======================= */
@@ -273,6 +273,7 @@ function blankState() {
       pushOn: false, pushServer: null, pushKey: null,
       lastExportAt: null, storagePersisted: null, keepAwake: true,
       license: null, firstRunAt: null, supportDismissedAt: null,
+      work: { startMin: 9 * 60, endMin: 17 * 60, days: [1, 2, 3, 4, 5], gapMin: 10, auto: false },
     },
     view: { current: 'today', todayOffset: 0, weekOffset: 0 },
   };
@@ -285,7 +286,7 @@ const SETTING_DEFAULTS = {
   timeBar: true, focusMode: false, tutorialSeen: false, lastRecapDate: null,
   pushOn: false, pushServer: null, pushKey: null,
   lastExportAt: null, storagePersisted: null, keepAwake: true,
-  license: null, firstRunAt: null, supportDismissedAt: null,
+  license: null, firstRunAt: null, supportDismissedAt: null, work: null,
 };
 
 /* ======================= State ======================= */
@@ -550,6 +551,7 @@ function renderToday() {
   renderScheduleToggle(ds);
   renderGrid(ds);
   renderBackupBanner();
+  renderAutoScheduleRow(ds);
   const schedToggle = document.getElementById('scheduleToggle');
   if (schedToggle) schedToggle.hidden = focus;
   if (focus) document.getElementById('gridScroll').hidden = true;
@@ -1107,6 +1109,11 @@ on('blockSaveBtn', 'click', () => {
     if (!activeBlock.date) activeBlock.date = activeBlockOpts.forceDate || currentTodayDateStr();
   } else {
     activeBlock.startMin = null;   // cleared / never set: keep it in the inbox
+    delete activeBlock.proposedMin;
+    if (work().auto && (activeBlock.date === todayStr() || activeBlock.date === null)) {
+      const at = autoPlaceTask(activeBlock, todayStr());
+      if (at != null) setTimeout(() => toast(`Scheduled for ${minToLabel(at)}`), 60);
+    }
   }
   activeBlock.durationMin = currentDuration;
   activeBlock.urgency = currentUrgency;
@@ -1581,13 +1588,17 @@ function showUndoBar(label) {
   if (!bar) return;
   document.getElementById('undoBarLabel').textContent = label ? `Undo ${label}` : 'Undo last change';
   bar.hidden = false;
+  // Lift the toast clear of the bar, or the two land on top of each other and
+  // neither is readable.
+  document.body.classList.add('undo-open');
   clearTimeout(undoBarTimer);
-  undoBarTimer = setTimeout(() => { bar.hidden = true; }, 12000);
+  undoBarTimer = setTimeout(() => { bar.hidden = true; document.body.classList.remove('undo-open'); }, 12000);
 }
 function hideUndoBar() {
   const bar = document.getElementById('undoBar');
   clearTimeout(undoBarTimer);
   if (bar) bar.hidden = true;
+  document.body.classList.remove('undo-open');
 }
 on('undoBarBtn', 'click', () => { undoLast(); hideUndoBar(); });
 on('undoBarClose', 'click', hideUndoBar);
@@ -1712,13 +1723,15 @@ on('quickAddForm', 'submit', (e) => {
     return;
   }
 
-  state.tasks.push({ id: uid(), title, date: dateForNew, startMin: null,
+  const fresh = { id: uid(), title, date: dateForNew, startMin: null,
     durationMin: typicalMinutes(title) || 30, done: false, someday: false,
-    createdAt: Date.now(), touchedAt: Date.now() });
+    createdAt: Date.now(), touchedAt: Date.now() };
+  state.tasks.push(fresh);
   input.value = '';
   saveState();
+  const at = maybeAutoPlace(fresh);
   renderAll();
-  toast('Added to inbox');
+  toast(at != null ? `Scheduled for ${minToLabel(at)}` : 'Added to inbox');
 });
 
 /* ======================= Render: Week ======================= */
@@ -4082,6 +4095,7 @@ on('settingsBtn', 'click', () => {
   renderPushRow();
   renderBackupRow();
   renderSupporterRow();
+  renderWorkRows();
   const chip = document.getElementById('versionChip');
   if (chip) chip.textContent = APP_VERSION;
   const note = document.getElementById('versionNote');
@@ -5984,6 +5998,270 @@ on('copyDiagBtn', 'click', async () => {
   } catch (e) {
     toast(text, 8000);
   }
+});
+
+/* ======================= Working hours & the auto-scheduler =======================
+   Deciding *when* to do something is a separate act of executive function from
+   deciding to do it at all, and it is the one that reliably doesn't happen —
+   which is how an inbox of perfectly good intentions turns into a list nobody
+   ever converts into a day. So the app will do that part: given hours you work
+   and the blocks already on the day, it drops each loose task into the first
+   slot it genuinely fits.
+
+   It only ever fills gaps. It never moves, shortens or overlaps anything that
+   is already scheduled, and it never touches an event that came from your
+   calendar — those are facts about your day, not suggestions. */
+const WORK_DEFAULTS = {
+  startMin: 9 * 60,
+  endMin: 17 * 60,
+  days: [1, 2, 3, 4, 5],     // 0 = Sunday
+  gapMin: 10,                // breathing room between blocks
+  auto: false,               // slot new tasks the moment they're captured
+};
+
+function work() {
+  if (!state.settings.work) state.settings.work = { ...WORK_DEFAULTS };
+  const w = state.settings.work;
+  if (typeof w.startMin !== 'number') w.startMin = WORK_DEFAULTS.startMin;
+  if (typeof w.endMin !== 'number') w.endMin = WORK_DEFAULTS.endMin;
+  if (!Array.isArray(w.days)) w.days = [...WORK_DEFAULTS.days];
+  if (typeof w.gapMin !== 'number') w.gapMin = WORK_DEFAULTS.gapMin;
+  return w;
+}
+
+function isWorkingDay(ds) {
+  const [y, m, d] = ds.split('-').map(Number);
+  return work().days.includes(new Date(y, m - 1, d).getDay());
+}
+
+/* Everything already claiming time on a given day, merged into a tidy list of
+   busy intervals. Imported calendar events count — the whole point is not to
+   book you against your own dentist. */
+function busyIntervals(ds) {
+  const gap = Math.max(0, work().gapMin);
+  const spans = state.tasks
+    .filter(t => t.date === ds && t.startMin != null && !t.done)
+    .map(t => ({ from: t.startMin - gap, to: t.startMin + Math.max(5, t.durationMin || 30) + gap }))
+    .sort((a, b) => a.from - b.from);
+
+  const merged = [];
+  spans.forEach(s => {
+    const last = merged[merged.length - 1];
+    if (last && s.from <= last.to) last.to = Math.max(last.to, s.to);
+    else merged.push({ ...s });
+  });
+  return merged;
+}
+
+/* The first free start time that fits `duration`, at or after `notBefore`. */
+function findSlot(ds, durationMin, notBefore) {
+  const w = work();
+  const dur = Math.max(5, durationMin || 30);
+  const busy = busyIntervals(ds);
+  let cursor = Math.max(w.startMin, notBefore || 0);
+
+  for (const span of busy) {
+    if (cursor + dur <= span.from) return cursor;      // fits before this block
+    cursor = Math.max(cursor, span.to);
+  }
+  return cursor + dur <= w.endMin ? cursor : null;
+}
+
+// "Now", rounded up to the next five minutes, so nothing lands in the past.
+function earliestToday(ds) {
+  if (ds !== todayStr()) return 0;
+  const now = new Date();
+  return Math.ceil((now.getHours() * 60 + now.getMinutes() + 1) / 5) * 5;
+}
+
+function schedulableTasks(ds) {
+  const isToday = ds === todayStr();
+  return state.tasks
+    .filter(t => !t.done && !t.someday && !t.external && t.startMin == null
+                 && (t.date === ds || (isToday && t.date === null)))
+    // Urgency first, then heavier work earlier — a "needs focus" task at 4pm
+    // is a task that gets moved to tomorrow.
+    .sort((a, b) =>
+      (urgencyRank(a.urgency) - urgencyRank(b.urgency)) ||
+      (energyRank(a.energy) - energyRank(b.energy)) ||
+      (a.createdAt - b.createdAt));
+}
+
+function energyRank(e) { return e === 'high' ? 0 : e === 'medium' ? 1 : e === 'low' ? 2 : 1.5; }
+
+/* Schedule one task, if there's room. Returns the chosen minute or null. */
+function autoPlaceTask(t, ds) {
+  const floor = earliestToday(ds);
+  // A time the task already suggested wins, provided it's free and not past.
+  if (t.proposedMin != null && t.proposedMin >= floor) {
+    const clash = busyIntervals(ds).some(s =>
+      t.proposedMin < s.to && t.proposedMin + (t.durationMin || 30) > s.from);
+    if (!clash && t.proposedMin + (t.durationMin || 30) <= work().endMin) {
+      t.date = ds;
+      t.startMin = t.proposedMin;
+      delete t.proposedMin;
+      touchTask(t);
+      return t.startMin;
+    }
+  }
+  const slot = findSlot(ds, t.durationMin || 30, floor);
+  if (slot == null) return null;
+  t.date = ds;
+  t.startMin = slot;
+  delete t.proposedMin;
+  touchTask(t);
+  return slot;
+}
+
+function autoScheduleDay(ds) {
+  const pending = schedulableTasks(ds);
+  let placed = 0, skipped = 0, firstMin = null;
+  pending.forEach(t => {
+    const min = autoPlaceTask(t, ds);
+    if (min == null) { skipped++; return; }
+    placed++;
+    if (firstMin == null || min < firstMin) firstMin = min;
+  });
+  if (placed) saveState('auto-scheduling your day');
+  return { placed, skipped, firstMin };
+}
+
+function renderAutoScheduleRow(ds) {
+  const row = document.getElementById('autoRow');
+  if (!row) return;
+  const n = schedulableTasks(ds).length;
+  row.hidden = n === 0 || !!state.settings.focusMode;
+  if (n) {
+    document.getElementById('autoBtn').textContent =
+      `Schedule ${n} task${n === 1 ? '' : 's'} into my day`;
+  }
+}
+
+on('autoBtn', 'click', () => {
+  const ds = currentTodayDateStr();
+  const res = autoScheduleDay(ds);
+  if (!res.placed && !res.skipped) { toast('Nothing waiting to be scheduled'); return; }
+
+  if (res.placed) {
+    // Show the result rather than describing it — the point is to see the day.
+    state.settings.showSchedule = true;
+    saveState('silent');
+    renderToday();
+    scrollGridToRelevant();
+  } else {
+    renderToday();
+  }
+
+  if (res.placed && res.skipped) {
+    toast(`${res.placed} scheduled · ${res.skipped} didn't fit before ${minToLabel(work().endMin)} — still in your inbox`, 6000);
+  } else if (res.placed) {
+    const dayNote = isWorkingDay(ds) ? '' : ' (not one of your working days, but you asked)';
+    toast(`${res.placed} task${res.placed === 1 ? '' : 's'} scheduled from ${minToLabel(res.firstMin)}${dayNote}`, 5000);
+  } else {
+    toast(`No room left between ${minToLabel(work().startMin)} and ${minToLabel(work().endMin)} — widen your hours in Settings, or shorten a block`, 7000);
+  }
+});
+
+/* Automatic mode: a task captured with no time is slotted immediately, so the
+   inbox never silently becomes a backlog. Off by default — some people want
+   the app to plan for them, others find it presumptuous. */
+function maybeAutoPlace(t) {
+  if (!work().auto) return null;
+  const ds = todayStr();
+  if (t.date !== ds && t.date !== null) return null;
+  if (t.startMin != null || t.done || t.someday) return null;
+  if (!isWorkingDay(ds)) return null;
+  const min = autoPlaceTask(t, ds);
+  if (min != null) saveState('silent');
+  return min;
+}
+
+/* ---------- Working hours UI ---------- */
+function renderWorkRows() {
+  const w = work();
+  const s = document.getElementById('workStartInput');
+  const e = document.getElementById('workEndInput');
+  if (s) s.value = minToTimeInput(w.startMin);
+  if (e) e.value = minToTimeInput(w.endMin);
+
+  const wrap = document.getElementById('workDays');
+  if (wrap) {
+    if (!wrap.childElementCount) {
+      // Monday-first, which is how almost everyone reads a working week.
+      [1, 2, 3, 4, 5, 6, 0].forEach(d => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'day-chip';
+        btn.dataset.day = d;
+        btn.textContent = WD[d][0];
+        btn.setAttribute('aria-label', WDFULL[d]);
+        btn.addEventListener('click', () => {
+          const days = work().days;
+          const i = days.indexOf(d);
+          if (i >= 0) days.splice(i, 1); else days.push(d);
+          saveState('silent');
+          renderWorkRows();
+          renderAll();
+        });
+        wrap.appendChild(btn);
+      });
+    }
+    wrap.querySelectorAll('.day-chip').forEach(el => {
+      el.classList.toggle('active', w.days.includes(+el.dataset.day));
+      el.setAttribute('aria-pressed', w.days.includes(+el.dataset.day) ? 'true' : 'false');
+    });
+  }
+
+  const auto = document.getElementById('autoScheduleToggle');
+  if (auto) {
+    auto.textContent = w.auto ? 'On' : 'Off';
+    auto.classList.toggle('active', !!w.auto);
+  }
+  const gap = document.getElementById('gapBtn');
+  if (gap) gap.textContent = w.gapMin ? `${w.gapMin} min` : 'None';
+
+  const note = document.getElementById('workNote');
+  if (note) {
+    const w2 = work();
+    note.textContent = w2.days.length
+      ? `Tasks are placed between ${minToLabel(w2.startMin)} and ${minToLabel(w2.endMin)}, ${w2.gapMin ? `with ${w2.gapMin} minutes between them` : 'back to back'}, on your working days only. Nothing already on the day is moved.`
+      : 'No working days selected — the button on Today still works if you ask it to.';
+  }
+}
+
+on('workStartInput', 'change', () => {
+  const v = document.getElementById('workStartInput').value;
+  if (!v) return;
+  const w = work();
+  w.startMin = timeToMin(v);
+  if (w.startMin >= w.endMin) w.endMin = Math.min(1439, w.startMin + 60);
+  saveState('silent');
+  renderWorkRows();
+});
+on('workEndInput', 'change', () => {
+  const v = document.getElementById('workEndInput').value;
+  if (!v) return;
+  const w = work();
+  w.endMin = timeToMin(v);
+  if (w.endMin <= w.startMin) w.startMin = Math.max(0, w.endMin - 60);
+  saveState('silent');
+  renderWorkRows();
+});
+on('autoScheduleToggle', 'click', () => {
+  const w = work();
+  w.auto = !w.auto;
+  saveState('silent');
+  renderWorkRows();
+  toast(w.auto
+    ? 'New tasks will be given a time automatically'
+    : 'New tasks will stay in your inbox until you schedule them');
+});
+const GAP_CHOICES = [0, 5, 10, 15, 30];
+on('gapBtn', 'click', () => {
+  const w = work();
+  w.gapMin = GAP_CHOICES[(GAP_CHOICES.indexOf(w.gapMin) + 1) % GAP_CHOICES.length];
+  saveState('silent');
+  renderWorkRows();
 });
 
 /* ======================= Focus & flow controls ======================= */
