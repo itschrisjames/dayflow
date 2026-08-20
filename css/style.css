@@ -1361,3 +1361,10 @@ body.undo-open .toast { bottom: 202px; }
   padding: 14px 16px; margin-bottom: 14px;
 }
 .push-nudge p { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+
+/* A row that has been pressed long enough to drag says so, so the gesture
+   isn't a mystery. */
+.inbox-item.armed .swipe-content,
+.block.armed .swipe-content,
+.week-block.armed { box-shadow: 0 0 0 2px var(--accent); }
+.drag-ghost { pointer-events: none !important; }

@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v27';
+const APP_VERSION = 'v28';
 const APP_BUILT = '2026-08-20';
 
 /* ======================= Storage ======================= */
@@ -459,6 +459,7 @@ function currentTodayDate() {
 
 /* ======================= Render: Today ======================= */
 function renderToday() {
+  sweepDragGhosts();
   const d = currentTodayDate();
   const ds = dateStr(d);
   const isToday = ds === todayStr();
@@ -714,7 +715,14 @@ function gridYToMin(y) {
 function pointToGridMin(clientX, clientY) {
   const gridWrap = document.getElementById('gridWrap');
   const rect = gridWrap.getBoundingClientRect();
-  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+  if (clientY < rect.top || clientY > rect.bottom) return null;
+  // Horizontal position carries no meaning here — only the hour does — and the
+  // 44px hour gutter sits outside this element, so dragging a task straight
+  // down from its grip used to land just left of the target and do nothing.
+  // Accept any x over the scroller, and let the y decide the time.
+  const scroller = document.getElementById('gridScroll');
+  const sr = scroller ? scroller.getBoundingClientRect() : rect;
+  if (clientX < sr.left - 8 || clientX > sr.right + 8) return null;
   return gridYToMin(clientY - rect.top);
 }
 
@@ -839,15 +847,41 @@ const SWIPE_REVEAL = 84;
 const SWIPE_AUTO_DELETE = 150;
 const SWIPE_PUSH = 90;            // drag this far right and the row asks to be moved
 
+/* A vertical drag has to be asked for. Scrolling a list is also "move your
+   finger up the screen", so treating any vertical movement as the start of a
+   drag meant every scroll began one — and iOS answers a gesture it has taken
+   over for scrolling with `pointercancel`, not `pointerup`. With no cancel
+   handler the cleanup never ran: the cloned drag ghost stayed in the DOM, the
+   row kept its half-transparent dragging style, and a fresh pair of
+   document-level listeners was left attached every single time. That is why it
+   got visibly worse with each swipe and why only a reload cleared it.
+
+   So: a drag starts either from the grip, which exists to say "drag me", or
+   after a short press. Everything else is a scroll. */
+const DRAG_HOLD_MS = 260;
+
+// Belt and braces: anything a previous build (or an unforeseen path) leaked
+// gets swept up on the next render rather than living there until a reload.
+function sweepDragGhosts() {
+  document.querySelectorAll('.drag-ghost').forEach(g => g.remove());
+  document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+}
+
 function makeInboxDraggable(el, t) {
   const content = el.querySelector('.swipe-content');
   let axis = null, dragging = false, startX = 0, startY = 0, ghost = null, baseX = 0;
+  let holdTimer = null, dragArmed = false;
   el.addEventListener('pointerdown', (e) => {
     axis = null;
     dragging = false;
     startX = e.clientX;
     startY = e.clientY;
     baseX = el._swipeOpen ? -SWIPE_REVEAL : 0;
+
+    // The grip is the "drag me" handle, so it needs no press-and-hold.
+    dragArmed = !!(e.target.closest && e.target.closest('.grip'));
+    clearTimeout(holdTimer);
+    if (!dragArmed) holdTimer = setTimeout(() => { dragArmed = true; el.classList.add('armed'); }, DRAG_HOLD_MS);
     const onMove = (ev) => {
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
       if (axis === null) {
@@ -865,11 +899,14 @@ function makeInboxDraggable(el, t) {
         el._pendingSwipeX = nx;
         return;
       }
-      // vertical: existing drag-to-place-on-grid behavior
+      // vertical: drag onto the grid — but only if this was asked for. If it
+      // wasn't, do nothing at all and let the page scroll.
+      if (!dragArmed) { clearTimeout(holdTimer); return; }
       if (!dragging) {
         dragging = true;
         el.classList.add('dragging');
         ghost = el.cloneNode(true);
+        ghost.classList.add('drag-ghost');
         ghost.style.position = 'fixed';
         ghost.style.width = el.getBoundingClientRect().width + 'px';
         ghost.style.zIndex = 100;
@@ -883,9 +920,29 @@ function makeInboxDraggable(el, t) {
         highlightDropTarget(ev.clientX, ev.clientY);
       }
     };
-    const onUp = (ev) => {
+    // One cleanup path, whatever ends the gesture. `pointercancel` is not an
+    // edge case on a touch device — it is what a scroll looks like from here.
+    const cleanup = () => {
+      clearTimeout(holdTimer);
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onCancel);
+      el.classList.remove('armed');
+      if (ghost) { ghost.remove(); ghost = null; }
+    };
+
+    const onCancel = () => {
+      cleanup();
+      el.classList.remove('dragging', 'pushing');
+      clearDropHighlights();
+      // A cancelled swipe should settle back rather than freeze mid-slide.
+      if (axis === 'x' && !el._swipeOpen) closeSwipeRowObj({ el, content });
+      dragging = false;
+      axis = null;
+    };
+
+    const onUp = (ev) => {
+      cleanup();
       if (axis === 'x') {
         const nx = el._pendingSwipeX || 0;
         el.classList.remove('pushing');
@@ -909,7 +966,6 @@ function makeInboxDraggable(el, t) {
         clearDropHighlights();
         if (dragging) {
           el._wasDragged = true;
-          if (ghost) ghost.remove();
           const min = pointToGridMin(ev.clientX, ev.clientY);
           if (min != null) {
             placeTask(t, currentTodayDateStr(), min);
@@ -922,6 +978,7 @@ function makeInboxDraggable(el, t) {
     };
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onCancel);
   });
 }
 
@@ -940,6 +997,7 @@ function makeBlockDraggable(el, t) {
   const content = el.querySelector('.swipe-content');
   const BLOCK_REVEAL = 60;
   let axis = null, dragging = false, startX = 0, startY = 0, origTop = 0, baseX = 0;
+  let holdTimer = null, dragArmed = false;
   el.addEventListener('pointerdown', (e) => {
     e.stopPropagation();
     axis = null;
@@ -948,6 +1006,11 @@ function makeBlockDraggable(el, t) {
     startY = e.clientY;
     origTop = parseFloat(el.style.top);
     baseX = el._swipeOpen ? -BLOCK_REVEAL : 0;
+    // The grid scrolls vertically too, so moving a block is a deliberate press
+    // and hold rather than anything that happens while browsing the day.
+    dragArmed = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => { dragArmed = true; el.classList.add('armed'); }, DRAG_HOLD_MS);
     const onMove = (ev) => {
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
       if (axis === null) {
@@ -963,6 +1026,7 @@ function makeBlockDraggable(el, t) {
         el._pendingSwipeX = nx;
         return;
       }
+      if (!dragArmed) { clearTimeout(holdTimer); return; }
       if (!dragging && Math.abs(dy) > 6) { dragging = true; el.classList.add('dragging'); }
       if (dragging) {
         let newTop = origTop + dy;
@@ -970,9 +1034,26 @@ function makeBlockDraggable(el, t) {
         el.style.top = newTop + 'px';
       }
     };
-    const onUp = (ev) => {
+    const cleanup = () => {
+      clearTimeout(holdTimer);
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onCancel);
+      el.classList.remove('armed');
+    };
+
+    const onCancel = () => {
+      cleanup();
+      el.classList.remove('dragging', 'pushing');
+      // Put the block back where it was rather than leaving it half-moved.
+      if (dragging) el.style.top = origTop + 'px';
+      if (axis === 'x' && !el._swipeOpen) closeSwipeRowObj({ el, content });
+      dragging = false;
+      axis = null;
+    };
+
+    const onUp = (ev) => {
+      cleanup();
       if (axis === 'x') {
         const nx = el._pendingSwipeX || 0;
         el.classList.remove('pushing');
@@ -1007,6 +1088,7 @@ function makeBlockDraggable(el, t) {
     };
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onCancel);
   });
 }
 
@@ -1768,6 +1850,7 @@ on('quickAddForm', 'submit', (e) => {
 
 /* ======================= Render: Week ======================= */
 function renderWeek() {
+  sweepDragGhosts();
   const base = addDays(startOfWeek(new Date()), state.view.weekOffset * 7);
   const end = addDays(base, 6);
   document.getElementById('weekRangeLabel').textContent = `${MON[base.getMonth()]} ${base.getDate()} – ${MON[end.getMonth()]} ${end.getDate()}`;
@@ -1802,13 +1885,19 @@ function renderWeek() {
 
 function makeWeekBlockDraggable(el, t) {
   let dragging = false, startX = 0, startY = 0, ghost = null;
+  let holdTimer = null, dragArmed = false;
   el.addEventListener('pointerdown', (e) => {
     startX = e.clientX; startY = e.clientY;
+    dragArmed = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => { dragArmed = true; el.classList.add('armed'); }, DRAG_HOLD_MS);
     const onMove = (ev) => {
+      if (!dragArmed) { clearTimeout(holdTimer); return; }   // a scroll, not a move
       if (!dragging && (Math.abs(ev.clientX - startX) > 8 || Math.abs(ev.clientY - startY) > 8)) {
         dragging = true;
         el.classList.add('dragging');
         ghost = el.cloneNode(true);
+        ghost.classList.add('drag-ghost');
         ghost.style.position = 'fixed';
         ghost.style.width = el.getBoundingClientRect().width + 'px';
         ghost.style.zIndex = 100;
@@ -1825,13 +1914,27 @@ function makeWeekBlockDraggable(el, t) {
         if (dayEl) dayEl.classList.add('drop-target');
       }
     };
-    const onUp = (ev) => {
+    const cleanup = () => {
+      clearTimeout(holdTimer);
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onCancel);
+      el.classList.remove('armed');
+      if (ghost) { ghost.remove(); ghost = null; }
+    };
+
+    const onCancel = () => {
+      cleanup();
+      el.classList.remove('dragging');
+      document.querySelectorAll('.week-day').forEach(d => d.classList.remove('drop-target'));
+      dragging = false;
+    };
+
+    const onUp = (ev) => {
+      cleanup();
       document.querySelectorAll('.week-day').forEach(d => d.classList.remove('drop-target'));
       if (dragging) {
         el._wasDragged = true;
-        if (ghost) ghost.remove();
         el.classList.remove('dragging');
         const target = document.elementFromPoint(ev.clientX, ev.clientY);
         const dayEl = target && target.closest('.week-day');
@@ -1846,6 +1949,7 @@ function makeWeekBlockDraggable(el, t) {
     };
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onCancel);
   });
 }
 

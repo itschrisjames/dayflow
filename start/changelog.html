@@ -54,7 +54,17 @@
   </header>
 
   <div class="rel">
-    <span class="tag now">v27 — current</span>
+    <span class="tag now">v28 — current</span>
+    <h2>Fixed: scrolling left ghosts behind</h2>
+    <ul>
+      <li>Scrolling the Today list could leave torn, half-transparent copies of tasks behind, getting worse with every swipe until you reloaded. iOS answers a gesture it takes over for scrolling with <em>pointercancel</em>, which nothing was listening for — so the drag cleanup never ran and a fresh set of handlers was left attached each time.</li>
+      <li>Dragging a task now needs either its <strong>grip handle</strong> or a <strong>short press</strong>, so scrolling can't start a drag at all.</li>
+      <li>Dropping a task anywhere over the schedule works now, including straight down the hour gutter.</li>
+    </ul>
+  </div>
+
+  <div class="rel">
+    <span class="tag">v27</span>
     <h2>Push it off</h2>
     <ul>
       <li>One button, three answers: <strong>later today</strong>, <strong>tomorrow</strong>, <strong>next week</strong>. Each finds a slot that is genuinely free, and shows you where it would land before you commit.</li>
