@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=26">
+<link rel="stylesheet" href="css/style.css?v=27">
 </head>
 <body>
 
@@ -236,6 +236,9 @@
     </div>
     <div class="sheet-actions">
       <button id="blockDoneBtn" class="pill-btn accent">Mark done</button>
+      <button id="blockPushBtn" class="pill-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="m4.5 3-2.2 2.2M19.5 3l2.2 2.2"/></svg><span>Push it off</span></button>
+    </div>
+    <div class="sheet-actions">
       <button id="blockUnscheduleBtn" class="pill-btn">Unschedule</button>
       <button id="blockDeleteBtn" class="pill-btn danger">Delete</button>
     </div>
@@ -683,6 +686,33 @@
   </div>
 </div>
 
+<div id="pushSheet" class="sheet" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Not now, then when?</h2>
+    <p class="settings-note push-task" style="text-align:left;margin:0 0 14px;"><strong id="pushTaskName">This task</strong></p>
+    <div class="push-options">
+      <button type="button" class="push-opt" id="push_today">
+        <span class="pw-main">Later today</span>
+        <span class="pw-sub"></span>
+      </button>
+      <button type="button" class="push-opt" id="push_tomorrow">
+        <span class="pw-main">Tomorrow</span>
+        <span class="pw-sub"></span>
+      </button>
+      <button type="button" class="push-opt" id="push_week">
+        <span class="pw-main">Next week</span>
+        <span class="pw-sub"></span>
+      </button>
+    </div>
+    <div id="pushNudge" class="push-nudge" hidden>
+      <p id="pushNudgeText"></p>
+      <button type="button" id="pushSomedayBtn" class="pill-btn">Move it to Someday</button>
+    </div>
+    <button id="pushCancelBtn" class="primary-btn">Leave it where it is</button>
+  </div>
+</div>
+
 <div id="importSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
@@ -851,6 +881,6 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/app.js?v=26"></script>
+<script src="js/app.js?v=27"></script>
 </body>
 </html>

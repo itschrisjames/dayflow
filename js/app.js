@@ -29,8 +29,8 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v26';
-const APP_BUILT = '2026-08-16';
+const APP_VERSION = 'v27';
+const APP_BUILT = '2026-08-20';
 
 /* ======================= Storage ======================= */
 const STORE_KEY = 'dayflow.v1';
@@ -574,6 +574,7 @@ function renderInboxItem(t) {
   // row is organising, and organising is never the bottleneck.
   el.innerHTML = `
     <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : ''}${subtaskChip(t)}${t.ruleId ? `<span class="repeat-dot" title="Repeats" aria-label="Repeating task">${icon('repeat', 12)}</span>` : ''}${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : ''}<button type="button" class="start5-btn" aria-label="Start 5 minutes on ${escapeHtml(t.title)}">${icon('play', 13, { fill: true, strokeWidth: 0 })}<span>5m</span></button></div>
+    <div class="swipe-push-hint" aria-hidden="true">${icon('alarm', 17)}<span>Later</span></div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}<span>Delete</span></button>
   `;
   el.querySelector('.start5-btn').addEventListener('click', (e) => {
@@ -780,6 +781,7 @@ function renderBlock(t) {
 
   el.innerHTML = `
     <div class="swipe-content"><div class="block-title">${escapeHtml(t.title)}</div><div class="block-time">${minToLabel(t.startMin)} · ${t.durationMin}m</div></div>
+    <div class="swipe-push-hint" aria-hidden="true">${icon('alarm', 15)}</div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}</button>
   `;
   el.querySelector('.swipe-delete-btn').addEventListener('click', (e) => {
@@ -835,6 +837,7 @@ let pendingPlace = null;
 /* ---------- Drag: inbox item -> grid, or swipe left to delete ---------- */
 const SWIPE_REVEAL = 84;
 const SWIPE_AUTO_DELETE = 150;
+const SWIPE_PUSH = 90;            // drag this far right and the row asks to be moved
 
 function makeInboxDraggable(el, t) {
   const content = el.querySelector('.swipe-content');
@@ -853,9 +856,12 @@ function makeInboxDraggable(el, t) {
         if (axis === 'x') closeAnyOpenSwipe();
       }
       if (axis === 'x') {
-        let nx = Math.min(0, Math.max(-SWIPE_REVEAL - 40, baseX + dx));
+        // Left reveals Delete and holds open; right is a one-shot "not now"
+        // that springs back and asks when instead.
+        let nx = Math.max(-SWIPE_REVEAL - 40, Math.min(SWIPE_PUSH + 30, baseX + dx));
         content.style.transition = 'none';
         content.style.transform = `translateX(${nx}px)`;
+        el.classList.toggle('pushing', nx >= SWIPE_PUSH * 0.6);
         el._pendingSwipeX = nx;
         return;
       }
@@ -882,8 +888,17 @@ function makeInboxDraggable(el, t) {
       document.removeEventListener('pointerup', onUp);
       if (axis === 'x') {
         const nx = el._pendingSwipeX || 0;
+        el.classList.remove('pushing');
         if (nx <= -SWIPE_AUTO_DELETE) {
           deleteTaskById(t.id);
+          return;
+        }
+        if (nx >= SWIPE_PUSH) {
+          closeSwipeRowObj({ el, content });
+          el._wasDragged = true;
+          el._pendingSwipeX = 0;
+          openPushSheet(t);
+          axis = null;
           return;
         }
         if (nx <= -SWIPE_REVEAL / 2) openSwipeRowObj(el, content, SWIPE_REVEAL);
@@ -941,9 +956,10 @@ function makeBlockDraggable(el, t) {
         if (axis === 'x') closeAnyOpenSwipe();
       }
       if (axis === 'x') {
-        let nx = Math.min(0, Math.max(-BLOCK_REVEAL - 30, baseX + dx));
+        let nx = Math.max(-BLOCK_REVEAL - 30, Math.min(SWIPE_PUSH + 20, baseX + dx));
         content.style.transition = 'none';
         content.style.transform = `translateX(${nx}px)`;
+        el.classList.toggle('pushing', nx >= SWIPE_PUSH * 0.6);
         el._pendingSwipeX = nx;
         return;
       }
@@ -959,8 +975,17 @@ function makeBlockDraggable(el, t) {
       document.removeEventListener('pointerup', onUp);
       if (axis === 'x') {
         const nx = el._pendingSwipeX || 0;
+        el.classList.remove('pushing');
         if (nx <= -(BLOCK_REVEAL + 60)) {
           deleteTaskById(t.id);
+          return;
+        }
+        if (nx >= SWIPE_PUSH) {
+          closeSwipeRowObj({ el, content });
+          el._wasDragged = true;
+          el._pendingSwipeX = 0;
+          openPushSheet(t);
+          axis = null;
           return;
         }
         if (nx <= -BLOCK_REVEAL / 2) openSwipeRowObj(el, content, BLOCK_REVEAL);
@@ -1180,6 +1205,13 @@ on('blockDoneBtn', 'click', () => {
   saveState();
   closeSheets();
   renderAll();
+});
+
+on('blockPushBtn', 'click', () => {
+  if (!activeBlock) return;
+  const t = activeBlock;
+  closeSheets();
+  setTimeout(() => openPushSheet(t), 80);
 });
 
 on('blockUnscheduleBtn', 'click', () => {
@@ -6175,6 +6207,140 @@ function maybeAutoPlace(t) {
   if (min != null) saveState('silent');
   return min;
 }
+
+/* ======================= Push it off =======================
+   The honest alternative to lying to yourself. When something isn't happening
+   now, the choices are: leave it sitting there accusing you, delete it and
+   lose it, or move it — and moving it by hand means opening a sheet, picking a
+   date, picking a time, and checking nothing clashes. That is four decisions
+   at the exact moment you have none left, so it doesn't happen and the task
+   rots on today's list instead.
+
+   One button, three answers. Each one finds a slot that is genuinely free, and
+   a task that has been pushed four times gets asked, kindly, whether it is
+   really a task at all. */
+const PUSH_MIN_GAP = 15;      // "later today" starts at least this far ahead
+
+function nextWorkingDs(from, maxAhead = 14) {
+  for (let i = 0; i <= maxAhead; i++) {
+    const ds = dateStr(addDays(from, i));
+    if (isWorkingDay(ds)) return ds;
+  }
+  return dateStr(from);
+}
+
+/* Where a task would land for a given choice, without changing anything —
+   so the buttons can show the answer before you commit to it. */
+function pushPreview(t, choice) {
+  const dur = t.durationMin || 30;
+  const timed = t.startMin != null;
+  const now = new Date();
+
+  if (choice === 'today') {
+    // "Later today" is an answer about the time of day, so it always produces
+    // one — even for a task that had none. Saying "stays in today's inbox"
+    // would be a button that does nothing.
+    const ds = todayStr();
+    const floor = Math.max(earliestToday(ds) + PUSH_MIN_GAP, (t.startMin != null ? t.startMin + dur : 0));
+    const slot = findSlot(ds, dur, floor);
+    return slot == null ? null : { ds, startMin: slot, slot };
+  }
+
+  if (choice === 'tomorrow') {
+    const ds = dateStr(addDays(now, 1));
+    if (!timed) return { ds, startMin: null, slot: null };
+    // Keep its usual time if that's free tomorrow; people build habits around
+    // "the 10am thing", and moving it to 9:00 for no reason is worse.
+    const slot = findSlot(ds, dur, t.startMin) === t.startMin ? t.startMin : findSlot(ds, dur, 0);
+    return slot == null ? null : { ds, startMin: slot, slot };
+  }
+
+  if (choice === 'week') {
+    const target = nextWorkingDs(addDays(now, 7));
+    if (!timed) return { ds: target, startMin: null, slot: null };
+    const slot = findSlot(target, dur, t.startMin) === t.startMin ? t.startMin : findSlot(target, dur, 0);
+    return slot == null ? null : { ds: target, startMin: slot, slot };
+  }
+  return null;
+}
+
+function pushLabel(t, choice) {
+  const p = pushPreview(t, choice);
+  if (!p) return choice === 'today' ? 'No room left today' : 'That day is full';
+  if (p.startMin == null) {
+    const [y, m, d] = p.ds.split('-').map(Number);
+    const dd = new Date(y, m - 1, d);
+    return p.ds === todayStr() ? 'stays in today’s inbox'
+      : `${WDFULL[dd.getDay()]} ${MON[dd.getMonth()]} ${dd.getDate()}, inbox`;
+  }
+  const [y, m, d] = p.ds.split('-').map(Number);
+  const dd = new Date(y, m - 1, d);
+  const dayBit = p.ds === todayStr() ? 'today' : `${WD[dd.getDay()]} ${dd.getDate()}`;
+  return `${dayBit} at ${minToLabel(p.startMin)}`;
+}
+
+let pushTarget = null;
+
+function openPushSheet(t) {
+  pushTarget = t;
+  document.getElementById('pushTaskName').textContent = t.title;
+  ['today', 'tomorrow', 'week'].forEach(choice => {
+    const btn = document.getElementById('push_' + choice);
+    if (!btn) return;
+    const p = pushPreview(t, choice);
+    btn.querySelector('.pw-sub').textContent = pushLabel(t, choice);
+    btn.disabled = !p;
+  });
+
+  const n = t.pushCount || 0;
+  const warn = document.getElementById('pushNudge');
+  if (warn) {
+    // Not a telling-off. Four pushes is information: this probably isn't a
+    // task for this week, and pretending otherwise costs you every time you
+    // read past it.
+    warn.hidden = n < 3;
+    document.getElementById('pushNudgeText').textContent =
+      `You've moved this ${n} times. That usually means it isn't really for this week — Someday keeps it without it staring at you.`;
+  }
+  openSheet('pushSheet');
+}
+
+function applyPush(choice) {
+  const t = pushTarget;
+  if (!t) return;
+  const p = pushPreview(t, choice);
+  if (!p) { toast('Nothing free that day — try another'); return; }
+
+  t.date = p.ds;
+  t.startMin = p.startMin;
+  delete t.proposedMin;
+  t.pushCount = (t.pushCount || 0) + 1;
+  touchTask(t);
+  saveState('pushing a task back');
+  closeSheets();
+  renderAll();
+
+  const where = p.startMin != null
+    ? (p.ds === todayStr() ? `later today, ${minToLabel(p.startMin)}` : `${pushLabel(t, choice)}`)
+    : (p.ds === todayStr() ? 'your inbox' : pushLabel(t, choice));
+  toast(`Pushed to ${where}`, 4000);
+}
+
+on('push_today', 'click', () => applyPush('today'));
+on('push_tomorrow', 'click', () => applyPush('tomorrow'));
+on('push_week', 'click', () => applyPush('week'));
+on('pushSomedayBtn', 'click', () => {
+  const t = pushTarget;
+  if (!t) return;
+  t.someday = true;
+  t.startMin = null;
+  touchTask(t);
+  saveState('moving a task to Someday');
+  closeSheets();
+  renderAll();
+  toast('Moved to Someday — it’s still there when you want it', 4000);
+});
+on('pushCancelBtn', 'click', closeSheets);
 
 /* ---------- Working hours UI ---------- */
 function renderWorkRows() {
