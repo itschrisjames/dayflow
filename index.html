@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=28">
+<link rel="stylesheet" href="css/style.css?v=29">
 </head>
 <body>
 
@@ -40,13 +40,11 @@
         <button id="todayNext" class="chevron" aria-label="Next day"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>
       </div>
 
-      <div id="backupBanner" class="backup-banner" hidden>
-        <span id="backupBannerText">Your data has never been backed up</span>
-        <button type="button" id="backupBannerBtn" class="bb-btn">Export</button>
-      </div>
-
-      <div id="carryRow" class="carry-row" hidden>
-        <button type="button" id="carryBtn" class="carry-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12h15M13.5 5.5l6.5 6.5-6.5 6.5"/></svg><span>Bring unfinished tasks to today</span></button>
+      <!-- One line, not a stack. The most useful prompt for right now is shown;
+           anything else waits behind the count. -->
+      <div id="dayBar" class="day-bar" hidden>
+        <div id="dayBarSlot" class="db-slot"></div>
+        <button type="button" id="dayBarMore" class="db-more" hidden aria-label="Other suggestions"></button>
       </div>
 
       <div id="inboxSection" class="inbox-section">
@@ -56,12 +54,6 @@
         </div>
         <div id="inboxList" class="inbox-list"></div>
         <div id="focusNote" class="focus-note" hidden></div>
-          <div id="autoRow" class="auto-row" hidden>
-          <button type="button" id="autoBtn" class="auto-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/><path d="m9 15 2 2 4-4"/></svg><span>Schedule my day</span></button>
-        </div>
-      <div id="somedayRow" class="someday-row-wrap" hidden>
-          <button type="button" id="somedayBtn" class="someday-btn">Someday</button>
-        </div>
       </div>
 
       <div id="checklistTodaySection" class="checklist-today-section" hidden>
@@ -102,21 +94,29 @@
     </section>
 
 
-    <!-- ROUTINES -->
-    <section id="view-routines" class="view">
-      <div class="section-label habits-label">Routines <span id="routinesCount" class="count-pill">0</span></div>
-      <div id="routinesContainer" class="view-pad"></div>
-      <button id="newRoutineBtn" class="add-row-btn">+ New routine</button>
-    </section>
+    <!-- TIMERS — routines and chores are both "a thing you time", so they share
+         a tab rather than each taking one of seven. -->
+    <section id="view-timers" class="view">
+      <div class="seg-wrap">
+        <div class="seg" id="timersSeg" role="tablist">
+          <button type="button" class="seg-btn active" data-seg="routines" role="tab" aria-selected="true">Routines</button>
+          <button type="button" class="seg-btn" data-seg="chores" role="tab" aria-selected="false">Chores</button>
+        </div>
+      </div>
 
-    <!-- CHORES -->
-    <section id="view-chores" class="view">
-      <div class="section-label habits-label">Chore Timer</div>
-      <p class="view-note">Time a chore once and DayFlow learns how long it really takes you.</p>
-      <div id="choresContainer" class="view-pad"></div>
-      <div class="list-add-row view-pad">
-        <input type="text" id="newChoreInput" placeholder="Add a chore (e.g. Washing dishes)…" maxlength="60">
-        <button type="button" id="addChoreBtn" aria-label="Add chore"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <div id="timersPaneRoutines" class="timers-pane">
+        <div id="routinesContainer" class="view-pad"></div>
+        <button id="newRoutineBtn" class="add-row-btn">+ New routine</button>
+        <span id="routinesCount" class="sr-only">0</span>
+      </div>
+
+      <div id="timersPaneChores" class="timers-pane" hidden>
+        <p class="view-note">Time a chore once and DayFlow learns how long it really takes you.</p>
+        <div id="choresContainer" class="view-pad"></div>
+        <div class="list-add-row view-pad">
+          <input type="text" id="newChoreInput" placeholder="Add a chore (e.g. Washing dishes)…" maxlength="60">
+          <button type="button" id="addChoreBtn" aria-label="Add chore"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        </div>
       </div>
     </section>
 
@@ -168,7 +168,7 @@
 
   <!-- ===== Quick Add (always visible) ===== -->
   <form id="quickAddForm" class="quick-add">
-    <button type="button" id="quickAddModeBtn" class="quick-add-mode" aria-label="Switch between task and habit"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6.5 9.2 17.3 4 12.1"/></svg></button>
+    <button type="button" id="assistantBtn" class="quick-add-mode" aria-label="Ask the assistant"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l1.7 4.8 4.8 1.7-4.8 1.7L12 16.2l-1.7-4.8L5.5 9.7l4.8-1.7L12 3.2Z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg></button>
     <button type="button" id="micBtn" class="quick-add-mic" aria-label="Dictate"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10.5v1.5a7 7 0 0 1-14 0v-1.5"/><path d="M12 19v3"/></svg></button>
     <input id="quickAddInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="400">
     <button type="submit" class="quick-add-btn" aria-label="Add"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -179,9 +179,7 @@
     <button class="tab active" data-view="today"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg></span><span>Today</span></button>
     <button class="tab" data-view="week"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/></svg></span><span>Week</span></button>
     <button class="tab" data-view="habits"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9.5"/></svg></span><span>Habits</span></button>
-    <button class="tab" data-view="routines"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2.5 3.5 3.5L17 9.5"/><path d="M3.5 11.5v-1a4 4 0 0 1 4-4h13"/><path d="m7 21.5-3.5-3.5L7 14.5"/><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13"/></svg></span><span>Routines</span></button>
-    <button class="tab" data-view="chores"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h5"/><path d="M12 14v-4"/><circle cx="12" cy="14" r="7.75"/></svg></span><span>Chores</span></button>
-    <button class="tab" data-view="chat"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l1.7 4.8 4.8 1.7-4.8 1.7L12 16.2l-1.7-4.8L5.5 9.7l4.8-1.7L12 3.2Z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg></span><span>Assistant</span></button>
+    <button class="tab" data-view="timers"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h5"/><path d="M12 14v-4"/><circle cx="12" cy="14" r="7.75"/></svg></span><span>Timers</span></button>
     <button class="tab" data-view="stats"><span class="tab-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M6.5 21v-6M12 21V6M17.5 21v-9"/></svg></span><span>Stats</span></button>
   </nav>
 
@@ -214,6 +212,11 @@
       <label>Duration</label>
       <button type="button" id="blockDurBtn" class="dur-picker-btn">30 min</button>
     </div>
+    <button type="button" id="blockMoreBtn" class="more-toggle" aria-expanded="false" aria-controls="blockMore">
+      <span>More</span>
+      <svg class="ico chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5.5 9 6.5 6.5L18.5 9"/></svg>
+    </button>
+    <div id="blockMore" hidden>
     <div class="sheet-row freq-row">
       <label>Effort</label>
       <div class="freq-options" id="energyOptions"></div>
@@ -234,8 +237,9 @@
         <button type="button" id="subtaskAddBtn" class="pill-btn accent small">Add</button>
       </div>
     </div>
+    </div>
     <div class="sheet-actions">
-      <button id="blockDoneBtn" class="pill-btn accent">Mark done</button>
+      <button id="blockDoneBtn" class="pill-btn">Mark done</button>
       <button id="blockPushBtn" class="pill-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="m4.5 3-2.2 2.2M19.5 3l2.2 2.2"/></svg><span>Push it off</span></button>
     </div>
     <div class="sheet-actions">
@@ -726,18 +730,80 @@
   </div>
 </div>
 
-<div id="settingsSheet" class="sheet" role="dialog" aria-modal="true" hidden>
+<div id="promptsSheet" class="sheet" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Also worth doing</h2>
+    <div id="promptsList" class="prompts-list"></div>
+    <button id="promptsDoneBtn" class="primary-btn">Done</button>
+  </div>
+</div>
+
+<div id="settingsSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
     <div class="sheet-header-row title-with-chip">
       <h2 style="margin:4px 0;">Settings</h2>
       <span class="version-chip" id="versionChip">v—</span>
     </div>
-    <div class="sheet-row">
-      <label>Reminders</label>
-      <button type="button" id="remindersToggleBtn" class="freq-opt" style="flex:none;padding:9px 18px;">Off</button>
+    <!-- An index, not a wall. Forty controls in one scroll made finding any
+         one of them a hunt; six rows makes the shape of the app legible. -->
+    <div class="set-index">
+      <button type="button" class="set-row" id="setAppearanceBtn">
+        <span class="sr-name">Appearance</span><span class="sr-sub" id="setAppearanceSub">Theme and accent colour</span>
+      </button>
+      <button type="button" class="set-row" id="setRemindersBtn">
+        <span class="sr-name">Reminders</span><span class="sr-sub" id="setRemindersSub">Alerts and background notifications</span>
+      </button>
+      <button type="button" class="set-row" id="setWorkBtn">
+        <span class="sr-name">Working hours</span><span class="sr-sub" id="setWorkSub">When the day may be filled</span>
+      </button>
+      <button type="button" class="set-row" id="setFlowBtn">
+        <span class="sr-name">Focus &amp; flow</span><span class="sr-sub" id="setFlowSub">How forgiving the app is</span>
+      </button>
+      <button type="button" class="set-row" id="calendarBtn">
+        <span class="sr-name">Calendar sync</span><span class="sr-sub" id="setCalSub">Google and Apple</span>
+      </button>
+      <button type="button" class="set-row" id="setDataBtn">
+        <span class="sr-name">Your data</span><span class="sr-sub" id="setDataSub">Backups, imports, repeats, archive</span>
+      </button>
+      <button type="button" class="set-row" id="setAboutBtn">
+        <span class="sr-name">About &amp; support</span><span class="sr-sub" id="setAboutSub">Feedback, updates, supporter key</span>
+      </button>
     </div>
-    <p class="settings-note" id="remindersNote" style="text-align:left;margin:2px 0 0;">Get notified when a time-blocked task starts, or when a routine's reminder time hits. Works best when DayFlow is installed to your Home Screen and open in the background.</p>
+    <p class="settings-note">All data stays on this device. Export regularly to keep a backup.</p>
+  </div>
+</div>
+
+<div id="setAppearanceSheet" class="sheet" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sub-head"><button type="button" class="back-btn" data-back>‹ Settings</button><h2>Appearance</h2></div>
+    <div class="sheet-row">
+      <label>Theme</label>
+      <div class="freq-options" id="themeOptions">
+        <button type="button" class="freq-opt" data-theme="auto">Auto</button>
+        <button type="button" class="freq-opt" data-theme="light">Light</button>
+        <button type="button" class="freq-opt" data-theme="dark">Dark</button>
+      </div>
+    </div>
+    <div class="sheet-row color-row">
+      <label>Accent colour</label>
+      <div class="color-swatches" id="colorSwatches"></div>
+    </div>
+    <button class="primary-btn" data-back>Done</button>
+  </div>
+</div>
+
+<div id="setRemindersSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sub-head"><button type="button" class="back-btn" data-back>‹ Settings</button><h2>Reminders</h2></div>
+    <div class="sheet-row">
+      <label>While DayFlow is open</label>
+      <button type="button" id="remindersToggleBtn" class="freq-opt toggle-opt">Off</button>
+    </div>
+    <p class="settings-note" id="remindersNote" style="text-align:left;margin:2px 0 0;"></p>
     <div class="sheet-row">
       <label>Background reminders</label>
       <button type="button" id="pushToggleBtn" class="freq-opt toggle-opt">Off</button>
@@ -746,8 +812,14 @@
     <div class="sheet-actions">
       <button id="pushSetupBtn" class="pill-btn">Set up push server</button>
     </div>
+    <button class="primary-btn" data-back>Done</button>
+  </div>
+</div>
 
-    <div class="section-label" style="padding-left:0;margin-top:6px;">Working hours</div>
+<div id="setWorkSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sub-head"><button type="button" class="back-btn" data-back>‹ Settings</button><h2>Working hours</h2></div>
     <div class="sheet-row">
       <label for="workStartInput">Start</label>
       <input id="workStartInput" type="time" step="900">
@@ -769,8 +841,14 @@
       <button type="button" id="autoScheduleToggle" class="freq-opt toggle-opt">Off</button>
     </div>
     <p class="settings-note" id="workNote" style="text-align:left;margin:2px 0 0;"></p>
+    <button class="primary-btn" data-back>Done</button>
+  </div>
+</div>
 
-    <div class="section-label" style="padding-left:0;margin-top:6px;">Focus &amp; flow</div>
+<div id="setFlowSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sub-head"><button type="button" class="back-btn" data-back>‹ Settings</button><h2>Focus &amp; flow</h2></div>
     <div class="sheet-row">
       <label>Streak grace day</label>
       <button type="button" id="graceToggle" class="freq-opt toggle-opt">On</button>
@@ -795,24 +873,19 @@
       <label>Keep screen awake in timers</label>
       <button type="button" id="keepAwakeToggle" class="freq-opt toggle-opt">On</button>
     </div>
-    <p class="settings-note" style="text-align:left;margin:2px 0 0;">One missed day a week won't break a streak · you're warned 5 minutes before a block starts and ends · finishing one task offers the next · a bar shows time draining toward your next block · anything untouched for 3 weeks moves to Someday · the screen stays on while a timer runs, and a timer that gets interrupted is picked up where it left off.</p>
+    <p class="settings-note" style="text-align:left;margin:2px 0 0;">One missed day a week won't break a streak · you're warned 5 minutes before a block starts and ends · finishing one task offers the next · a bar shows time draining toward your next block · anything untouched for 3 weeks moves to Someday · the screen stays on while a timer runs.</p>
     <div class="sheet-actions">
       <button id="openRecapBtn" class="pill-btn">Today's recap</button>
       <button id="showTourBtn" class="pill-btn">Replay tutorial</button>
     </div>
-    <div class="sheet-row">
-      <label>Appearance</label>
-      <div class="freq-options" id="themeOptions">
-        <button type="button" class="freq-opt" data-theme="auto">Auto</button>
-        <button type="button" class="freq-opt" data-theme="light">Light</button>
-        <button type="button" class="freq-opt" data-theme="dark">Dark</button>
-      </div>
-    </div>
-    <div class="sheet-row color-row">
-      <label>Accent color</label>
-      <div class="color-swatches" id="colorSwatches"></div>
-    </div>
-    <div class="section-label" style="padding-left:0;margin-top:6px;">Your data</div>
+    <button class="primary-btn" data-back>Done</button>
+  </div>
+</div>
+
+<div id="setDataSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sub-head"><button type="button" class="back-btn" data-back>‹ Settings</button><h2>Your data</h2></div>
     <div class="sheet-actions">
       <button id="exportBtn" class="pill-btn accent">Export JSON</button>
       <label class="pill-btn" for="importFile">Import file</label>
@@ -823,23 +896,42 @@
       <button id="backupRestoreBtn" class="pill-btn">Restore snapshot</button>
     </div>
     <p class="settings-note" id="backupNote" style="text-align:left;margin:2px 0 0;"></p>
-    <p class="settings-note" style="text-align:left;margin:6px 0 0;">Import takes a DayFlow backup, a JSON list of items, or a CSV with a header row — a content calendar, a schedule, anything with titles and dates. You see what it found before anything is added.</p>
+    <p class="settings-note" style="text-align:left;margin:6px 0 0;">Import takes a DayFlow backup, a JSON list of items, or a CSV with a header row. You see what it found before anything is added.</p>
     <div class="sheet-actions">
       <button id="repeatManageBtn" class="pill-btn">Repeating tasks</button>
       <button id="archiveBtn" class="pill-btn">Archive</button>
     </div>
+    <div class="section-label" style="padding-left:0;margin-top:10px;">Clearing things out</div>
     <div class="sheet-actions">
-      <button id="calendarBtn" class="pill-btn accent">Calendar sync</button>
+      <button id="clearPracticeBtn" class="pill-btn danger">Clear practice records</button>
     </div>
+    <div class="sheet-actions">
+      <button id="clearSampleBtn" class="pill-btn danger">Remove all sample data</button>
+    </div>
+    <div class="sheet-actions">
+      <button id="resetBtn" class="pill-btn danger">Erase everything</button>
+    </div>
+    <button class="primary-btn" data-back>Done</button>
+  </div>
+</div>
 
-    <div class="section-label" style="padding-left:0;margin-top:6px;">Feedback</div>
+<div id="setAboutSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sub-head"><button type="button" class="back-btn" data-back>‹ Settings</button><h2>About &amp; support</h2></div>
+    <div class="sheet-actions">
+      <button id="forceUpdateBtn" class="pill-btn accent">Check for update</button>
+    </div>
+    <div class="version-readout" id="versionNote"></div>
+
+    <div class="section-label" style="padding-left:0;margin-top:10px;">Feedback</div>
     <p class="settings-note" style="text-align:left;margin:0 0 8px;">Tell me what broke or what's missing. The message comes pre-filled with your build number and screen size — no task names, nothing personal.</p>
     <div class="sheet-actions">
       <button id="feedbackBtn" class="pill-btn accent">Send feedback</button>
       <button id="copyDiagBtn" class="pill-btn">Copy details</button>
     </div>
 
-    <div class="section-label" style="padding-left:0;margin-top:6px;">Supporter</div>
+    <div class="section-label" style="padding-left:0;margin-top:10px;">Supporter</div>
     <div id="supportNag" class="support-nag" hidden>
       <p>You've been using DayFlow for a while. It's free and it stays free — but if it's earned a few pounds, that's what keeps it getting better.</p>
       <div class="sheet-actions">
@@ -862,25 +954,12 @@
         <button type="button" id="supporterApplyBtn" class="pill-btn accent small">Apply</button>
       </div>
     </div>
-    <div class="sheet-actions">
-      <button id="clearPracticeBtn" class="pill-btn danger">Clear practice records</button>
-    </div>
-    <div class="sheet-actions">
-      <button id="clearSampleBtn" class="pill-btn danger">Remove all sample data</button>
-    </div>
-    <div class="sheet-actions">
-      <button id="resetBtn" class="pill-btn danger">Erase everything</button>
-    </div>
-    <div class="sheet-actions">
-      <button id="forceUpdateBtn" class="pill-btn accent">Check for update</button>
-    </div>
-    <div class="version-readout" id="versionNote"></div>
-    <p class="settings-note">All data stays on this device. Export regularly to keep a backup.</p>
+    <button class="primary-btn" data-back>Done</button>
   </div>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/app.js?v=28"></script>
+<script src="js/app.js?v=29"></script>
 </body>
 </html>

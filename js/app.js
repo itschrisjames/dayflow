@@ -29,7 +29,7 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v28';
+const APP_VERSION = 'v29';
 const APP_BUILT = '2026-08-20';
 
 /* ======================= Storage ======================= */
@@ -287,6 +287,7 @@ const SETTING_DEFAULTS = {
   pushOn: false, pushServer: null, pushKey: null,
   lastExportAt: null, storagePersisted: null, keepAwake: true,
   license: null, firstRunAt: null, supportDismissedAt: null, work: null,
+  taskSheetExpanded: false,
 };
 
 /* ======================= State ======================= */
@@ -421,10 +422,49 @@ function renderColorSwatches(selectedId) {
 }
 
 /* ======================= Navigation ======================= */
-const views = ['today', 'week', 'habits', 'routines', 'chores', 'chat', 'stats'];
-const titles = { today: 'Today', week: 'Week', habits: 'Habits', routines: 'Routines', chores: 'Chore Timer', chat: 'Assistant', stats: 'Stats' };
+/* Five tabs, not seven. Routines and chores are both "a thing you time", so
+   they share one tab and a segmented control; the Assistant moved to the
+   composer bar, which is where you were going to type to it anyway. */
+const views = ['today', 'week', 'habits', 'timers', 'chat', 'stats'];
+const titles = { today: 'Today', week: 'Week', habits: 'Habits', timers: 'Timers', chat: 'Assistant', stats: 'Stats' };
+// Installs from before the merge have 'routines' or 'chores' stored.
+const LEGACY_VIEWS = { routines: 'timers', chores: 'timers' };
+
+function timersTab() { return state.view.timersTab === 'chores' ? 'chores' : 'routines'; }
+
+function setTimersTab(which) {
+  state.view.timersTab = which === 'chores' ? 'chores' : 'routines';
+  saveState('silent');
+  paintTimersTab();
+  renderAll();
+}
+
+function paintTimersTab() {
+  const which = timersTab();
+  document.querySelectorAll('#timersSeg .seg-btn').forEach(b => {
+    const on = b.dataset.seg === which;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  const r = document.getElementById('timersPaneRoutines');
+  const c = document.getElementById('timersPaneChores');
+  if (r) r.hidden = which !== 'routines';
+  if (c) c.hidden = which !== 'chores';
+}
+
+document.querySelectorAll('#timersSeg .seg-btn').forEach(b => {
+  b.addEventListener('click', () => setTimersTab(b.dataset.seg));
+});
 
 function switchView(name) {
+  if (LEGACY_VIEWS[name]) {
+    // Asking for routines or chores still works — it lands on the right half
+    // of the Timers tab.
+    if (state.view.timersTab !== name) { state.view.timersTab = name; paintTimersTab(); }
+    name = LEGACY_VIEWS[name];
+  }
+  // Remember where to come back to when the Assistant is dismissed.
+  if (name === 'chat' && state.view.current !== 'chat') state.view.beforeChat = state.view.current;
   const changed = state.view.current !== name;
   state.view.current = name;
   views.forEach(v => document.getElementById('view-' + v).classList.toggle('active', v === name));
@@ -441,7 +481,11 @@ function switchView(name) {
 function updateInputBarMode() {
   const isChat = state.view.current === 'chat';
   const input = document.getElementById('quickAddInput');
-  document.getElementById('quickAddModeBtn').hidden = isChat;
+  const aBtn = document.getElementById('assistantBtn');
+  if (aBtn) {
+    aBtn.classList.toggle('habit-mode', isChat);
+    aBtn.setAttribute('aria-label', isChat ? 'Back to Today' : 'Ask the assistant');
+  }
   const sendBtn = document.querySelector('.quick-add-btn');
   if (sendBtn) sendBtn.innerHTML = icon(isChat ? 'arrowUp' : 'plus', 20, { strokeWidth: 2.1 });
   if (isChat) input.placeholder = 'Ask me anything…';
@@ -495,21 +539,7 @@ function renderToday() {
     focusNote.textContent = `${hiddenCount} more parked — they'll still be here`;
   }
 
-  // Overdue leftovers: one tap beats re-dating them one at a time.
-  const carryRow = document.getElementById('carryRow');
-  if (carryRow) {
-    const over = isToday ? overdueTasks().length : 0;
-    carryRow.hidden = over === 0 || focus;
-    if (over) document.getElementById('carryBtn').textContent =
-      `Bring ${over} unfinished task${over === 1 ? '' : 's'} to today`;
-  }
-
-  const sdRow = document.getElementById('somedayRow');
-  if (sdRow) {
-    const n = somedayTasks().length;
-    sdRow.hidden = n === 0 || focus;
-    if (n) document.getElementById('somedayBtn').textContent = `Someday · ${n}`;
-  }
+  renderDayBar(ds);
 
   // checklist-today (lists attached to this date)
   const attached = state.lists.filter(l => l.attachedDate === ds);
@@ -551,12 +581,25 @@ function renderToday() {
 
   renderScheduleToggle(ds);
   renderGrid(ds);
-  renderBackupBanner();
-  renderAutoScheduleRow(ds);
   const schedToggle = document.getElementById('scheduleToggle');
   if (schedToggle) schedToggle.hidden = focus;
   if (focus) document.getElementById('gridScroll').hidden = true;
   renderTimeBar();
+}
+
+/* One line, only when it earns its place. Urgency is deliberately absent — the
+   left edge says that already, and repeating it is how a row gets busy. */
+function rowMeta(t) {
+  const bits = [];
+  const subs = (t.subtasks || []).length;
+  if (subs) {
+    const done = t.subtasks.filter(x => x.done).length;
+    bits.push(`<span class="rm-steps${done === subs ? ' complete' : ''}">${done}/${subs} steps</span>`);
+  }
+  if (t.ruleId) bits.push(`<span class="rm-bit">${icon('repeat', 11)} repeats</span>`);
+  if (t.notes) bits.push(`<span class="rm-bit">${icon('list', 11)} note</span>`);
+  if (t.energy === 'high') bits.push('<span class="rm-bit">needs focus</span>');
+  return bits.join('<span class="rm-dot">·</span>');
 }
 
 function subtaskChip(t) {
@@ -573,8 +616,16 @@ function renderInboxItem(t) {
   // The play button is the most important control on this row: it starts a
   // five-minute timer with zero decisions in between. Everything else on the
   // row is organising, and organising is never the bottleneck.
+  // Two things carry the row: the title, and the button that starts it. Urgency
+  // became the coloured edge — colour already meant urgency everywhere else —
+  // and everything else that used to sit inline is one quiet line underneath,
+  // present only when there is something to say. The grip is gone: since a
+  // press-and-hold drags from anywhere, it was a handle for a gesture that no
+  // longer needed one.
+  if (t.urgency) el.classList.add('u-' + t.urgency);
+  const meta = rowMeta(t);
   el.innerHTML = `
-    <div class="swipe-content"><span class="grip">${icon('grip', 16)}</span><span class="title">${escapeHtml(t.title)}</span>${t.urgency ? `<span class="u-tag ${t.urgency}">${URGENCY_BY_ID[t.urgency].short}</span>` : ''}${subtaskChip(t)}${t.ruleId ? `<span class="repeat-dot" title="Repeats" aria-label="Repeating task">${icon('repeat', 12)}</span>` : ''}${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : ''}<button type="button" class="start5-btn" aria-label="Start 5 minutes on ${escapeHtml(t.title)}">${icon('play', 13, { fill: true, strokeWidth: 0 })}<span>5m</span></button></div>
+    <div class="swipe-content"><div class="row-main"><div class="title">${escapeHtml(t.title)}</div>${meta ? `<div class="row-meta">${meta}</div>` : ''}</div>${t.proposedMin != null ? `<button type="button" class="time-chip">${minToLabel(t.proposedMin)}</button>` : ''}<button type="button" class="start5-btn" aria-label="Start 5 minutes on ${escapeHtml(t.title)}">${icon('play', 13, { fill: true, strokeWidth: 0 })}<span>5m</span></button></div>
     <div class="swipe-push-hint" aria-hidden="true">${icon('alarm', 17)}<span>Later</span></div>
     <button type="button" class="swipe-delete-btn" aria-label="Delete task">${icon('trash', 18)}<span>Delete</span></button>
   `;
@@ -1140,6 +1191,7 @@ function openBlockSheet(t, opts = {}) {
   renderSubtaskEditor();
   currentRepeat = (state.recurring.find(r => r.id === t.ruleId) || {}).kind || 'none';
   renderRepeatOptions();
+  paintBlockMore();
   document.getElementById('blockDoneBtn').textContent = t.done ? 'Mark not done' : 'Mark done';
   document.getElementById('blockUnscheduleBtn').style.display = t.startMin == null ? 'none' : 'flex';
   activeBlockOpts = opts;
@@ -1260,6 +1312,27 @@ function paintRepeatOptions() {
     el.classList.toggle('active', el.dataset.repeat === currentRepeat);
   });
 }
+
+/* Effort, repeat, steps and notes are all things you set once and rarely
+   revisit, so they sit behind one expander. The common case — look at it, start
+   it, or give it a time — now fits on a single screen. The choice is
+   remembered, because someone who wants the detail usually always wants it. */
+function paintBlockMore() {
+  const open = !!state.settings.taskSheetExpanded;
+  const wrap = document.getElementById('blockMore');
+  const btn = document.getElementById('blockMoreBtn');
+  if (!wrap || !btn) return;
+  wrap.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  btn.classList.toggle('open', open);
+  btn.querySelector('span').textContent = open ? 'Less' : 'More';
+}
+
+on('blockMoreBtn', 'click', () => {
+  state.settings.taskSheetExpanded = !state.settings.taskSheetExpanded;
+  saveState('silent');
+  paintBlockMore();
+});
 
 /* Two ways out of the sheet that both mean "begin now": a five-minute nibble,
    or the full planned block. Either one starts immediately. */
@@ -1722,21 +1795,14 @@ let quickAddMode = 'task'; // 'task' | 'habit'
 
 function setQuickAddMode(mode) {
   quickAddMode = mode;
-  const btn = document.getElementById('quickAddModeBtn');
   const input = document.getElementById('quickAddInput');
-  if (mode === 'habit') {
-    btn.innerHTML = icon('target', 20);
-    btn.classList.add('habit-mode');
-    input.placeholder = 'New daily habit…';
-  } else {
-    btn.innerHTML = icon('check', 20);
-    btn.classList.remove('habit-mode');
-    input.placeholder = 'Add a task…';
-  }
+  if (!input) return;
+  input.placeholder = mode === 'habit' ? 'New daily habit…' : 'Add a task…';
 }
 
-on('quickAddModeBtn', 'click', () => {
-  setQuickAddMode(quickAddMode === 'task' ? 'habit' : 'task');
+on('assistantBtn', 'click', () => {
+  if (state.view.current === 'chat') switchView(state.view.beforeChat || 'today');
+  else switchView('chat');
 });
 
 /* Thoughts arrive in bursts, not one at a time. Pasting or dictating a list
@@ -1802,6 +1868,21 @@ on('quickAddForm', 'submit', (e) => {
     input.value = '';
     handleChatInput(title);
     return;
+  }
+
+  // "habit: stretch" is faster than reaching for a mode switch, and it reads
+  // as what it does.
+  const habitPrefix = title.match(/^habits?\s*[:\-]\s*(.+)$/i);
+  if (habitPrefix) {
+    const name = habitPrefix[1].trim();
+    if (name) {
+      state.habits.push({ id: uid(), name, freq: { type: 'daily' }, completions: {}, sessions: [], dailyTarget: 1, timed: false, archived: false });
+      saveState('adding a habit');
+      input.value = '';
+      renderAll();
+      toast(`Tracking “${name}” from today`);
+      return;
+    }
   }
 
   if (quickAddMode === 'habit') {
@@ -2663,7 +2744,7 @@ function renderRoutinesView() {
       </div>
     </div>
     <div class="routine-card-actions">
-      <button class="pill-btn accent" data-act="alarm">Set up</button>
+      <button class="pill-btn" data-act="alarm">Set up</button>
     </div>
   `;
   alarmCard.querySelector('[data-act="alarm"]').addEventListener('click', openAlarmSheet);
@@ -4224,19 +4305,73 @@ function assistantFallback(raw) {
 }
 
 /* ======================= Settings sheet ======================= */
-on('settingsBtn', 'click', () => {
-  applyTheme();
-  renderRemindersToggle();
-  renderFlowToggles();
-  renderPushRow();
-  renderBackupRow();
-  renderSupporterRow();
-  renderWorkRows();
-  const chip = document.getElementById('versionChip');
-  if (chip) chip.textContent = APP_VERSION;
+/* Settings is an index now, so each sub-sheet paints itself as it opens and
+   the index shows a one-line summary of what is inside. */
+const SETTINGS_SECTIONS = {
+  setAppearanceBtn: { sheet: 'setAppearanceSheet', paint: () => applyTheme() },
+  setRemindersBtn: { sheet: 'setRemindersSheet', paint: () => { renderRemindersToggle(); renderPushRow(); } },
+  setWorkBtn: { sheet: 'setWorkSheet', paint: () => renderWorkRows() },
+  setFlowBtn: { sheet: 'setFlowSheet', paint: () => renderFlowToggles() },
+  setDataBtn: { sheet: 'setDataSheet', paint: () => renderBackupRow() },
+  setAboutBtn: { sheet: 'setAboutSheet', paint: () => { renderSupporterRow(); renderVersionNote(); } },
+};
+
+Object.entries(SETTINGS_SECTIONS).forEach(([btnId, sec]) => {
+  on(btnId, 'click', () => { sec.paint(); openSheet(sec.sheet); });
+});
+
+// Every sub-sheet's back and Done buttons return to the index.
+document.addEventListener('click', (e) => {
+  const back = e.target.closest && e.target.closest('[data-back]');
+  if (!back) return;
+  e.preventDefault();
+  openSettingsIndex();
+});
+
+function renderVersionNote() {
   const note = document.getElementById('versionNote');
   if (note) note.innerHTML = `You're on ${APP_VERSION}<span class="built">built ${APP_BUILT}</span>`;
+}
+
+function settingsSummaries() {
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const scheme = COLOR_SCHEMES.find(x => x.id === (state.settings.colorScheme || 'orange'));
+  const theme = state.settings.theme || 'auto';
+  set('setAppearanceSub', `${theme[0].toUpperCase()}${theme.slice(1)} · ${scheme ? scheme.name : 'Orange'}`);
+
+  const remOn = state.settings.remindersEnabled && 'Notification' in window && Notification.permission === 'granted';
+  set('setRemindersSub', remOn
+    ? (state.settings.pushOn ? 'On, including while DayFlow is closed' : 'On while DayFlow is open')
+    : 'Off — nothing will alert you');
+
+  const w = work();
+  set('setWorkSub', w.days.length
+    ? `${minToLabel(w.startMin)}–${minToLabel(w.endMin)} · ${w.days.length} day${w.days.length === 1 ? '' : 's'}${w.auto ? ' · auto' : ''}`
+    : 'No working days set');
+
+  const flowOff = ['graceDays', 'transitionWarn', 'momentum', 'timeBar', 'autoDecay', 'keepAwake']
+    .filter(k => state.settings[k] === false).length;
+  set('setFlowSub', flowOff ? `${flowOff} turned off` : 'All the gentle defaults on');
+
+  set('setCalSub', googleConnected()
+    ? `Google connected · ${externalCount()} event${externalCount() === 1 ? '' : 's'} showing`
+    : externalCount('apple') ? `${externalCount('apple')} imported from Calendar` : 'Google and Apple');
+
+  const d = daysSince(state.settings.lastExportAt);
+  set('setDataSub', d === null ? 'Never backed up' : d === 0 ? 'Backed up today' : `Backed up ${d} day${d === 1 ? '' : 's'} ago`);
+  set('setAboutSub', isSupporter() ? `${APP_VERSION} · supporter` : `${APP_VERSION} · feedback and updates`);
+}
+
+function openSettingsIndex() {
+  settingsSummaries();
+  const chip = document.getElementById('versionChip');
+  if (chip) chip.textContent = APP_VERSION;
   openSheet('settingsSheet');
+}
+
+on('settingsBtn', 'click', () => {
+  applyTheme();
+  openSettingsIndex();
 });
 
 /* Force a genuinely fresh copy: drop every cache and service worker, then
@@ -4623,19 +4758,6 @@ function renderBackupRow() {
   note.textContent = bits.join(' ');
 }
 
-function renderBackupBanner() {
-  const el = document.getElementById('backupBanner');
-  if (!el) return;
-  const d = daysSince(state.settings.lastExportAt);
-  const stale = hasRealData() && (d === null || d >= BACKUP_NAG_DAYS);
-  el.hidden = !stale || state.view.current !== 'today' || !!state.settings.focusMode;
-  if (stale) {
-    document.getElementById('backupBannerText').textContent = d === null
-      ? 'Your data has never been backed up'
-      : `Last backup was ${d} days ago`;
-  }
-}
-
 function exportBackup() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -4650,11 +4772,10 @@ function exportBackup() {
   saveState('silent');
   writeLocalSnapshot();
   renderBackupRow();
-  renderBackupBanner();
+  renderAll();
   toast('Exported — keep it somewhere that isn’t this phone');
 }
 
-on('backupBannerBtn', 'click', exportBackup);
 on('backupSnapshotBtn', 'click', () => {
   toast(writeLocalSnapshot() ? 'Local snapshot saved' : 'Could not write a snapshot — storage may be full');
   renderBackupRow();
@@ -6262,18 +6383,7 @@ function autoScheduleDay(ds) {
   return { placed, skipped, firstMin };
 }
 
-function renderAutoScheduleRow(ds) {
-  const row = document.getElementById('autoRow');
-  if (!row) return;
-  const n = schedulableTasks(ds).length;
-  row.hidden = n === 0 || !!state.settings.focusMode;
-  if (n) {
-    document.getElementById('autoBtn').textContent =
-      `Schedule ${n} task${n === 1 ? '' : 's'} into my day`;
-  }
-}
-
-on('autoBtn', 'click', () => {
+function runAutoSchedule() {
   const ds = currentTodayDateStr();
   const res = autoScheduleDay(ds);
   if (!res.placed && !res.skipped) { toast('Nothing waiting to be scheduled'); return; }
@@ -6296,7 +6406,7 @@ on('autoBtn', 'click', () => {
   } else {
     toast(`No room left between ${minToLabel(work().startMin)} and ${minToLabel(work().endMin)} — widen your hours in Settings, or shorten a block`, 7000);
   }
-});
+}
 
 /* Automatic mode: a task captured with no time is slotted immediately, so the
    inbox never silently becomes a backlog. Off by default — some people want
@@ -6534,6 +6644,94 @@ on('gapBtn', 'click', () => {
   renderWorkRows();
 });
 
+/* ======================= The day bar =======================
+   Four separate banners could stack above the first real task: back up your
+   data, bring yesterday's leftovers over, schedule the loose ones, and the
+   Someday drawer. Individually each is reasonable; together they are a wall of
+   chrome in front of the thing you opened the app to do.
+
+   So they became one line. The most useful prompt for right now is shown as a
+   real button, and the rest wait behind a count — still one tap away, just not
+   all shouting at once. */
+function dayPrompts(ds) {
+  const list = [];
+  const isToday = ds === todayStr();
+
+  const staleDays = daysSince(state.settings.lastExportAt);
+  if (hasRealData() && (staleDays === null || staleDays >= BACKUP_NAG_DAYS)) {
+    list.push({
+      key: 'backup', tone: 'warn', id: 'backupBannerBtn', icon: 'download',
+      label: staleDays === null ? 'Back up your data' : `Back up — ${staleDays} days since the last one`,
+      run: exportBackup,
+    });
+  }
+
+  const over = isToday ? overdueTasks().length : 0;
+  if (over) {
+    list.push({
+      key: 'carry', id: 'carryBtn', icon: 'arrowRight',
+      label: `Bring ${over} unfinished task${over === 1 ? '' : 's'} to today`,
+      run: carryForward,
+    });
+  }
+
+  const loose = schedulableTasks(ds).length;
+  if (loose) {
+    list.push({
+      key: 'auto', id: 'autoBtn', icon: 'calendar',
+      label: `Schedule ${loose} task${loose === 1 ? '' : 's'} into my day`,
+      run: runAutoSchedule,
+    });
+  }
+
+  const sd = somedayTasks().length;
+  if (sd) {
+    list.push({
+      key: 'someday', id: 'somedayBtn', icon: 'moon',
+      label: `Someday · ${sd}`,
+      run: openSomeday,
+    });
+  }
+
+  return list;
+}
+
+function promptButton(pr, cls) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = pr.id;
+  btn.className = cls + (pr.tone === 'warn' ? ' warn' : '');
+  btn.dataset.prompt = pr.key;
+  btn.innerHTML = `${icon(pr.icon, 16)}<span>${escapeHtml(pr.label)}</span>`;
+  btn.addEventListener('click', () => pr.run());
+  return btn;
+}
+
+function renderDayBar(ds) {
+  const bar = document.getElementById('dayBar');
+  const slot = document.getElementById('dayBarSlot');
+  const more = document.getElementById('dayBarMore');
+  if (!bar || !slot) return;
+
+  const prompts = state.settings.focusMode ? [] : dayPrompts(ds);
+  slot.innerHTML = '';
+  bar.hidden = prompts.length === 0;
+  if (!prompts.length) { if (more) more.hidden = true; return; }
+
+  slot.appendChild(promptButton(prompts[0], 'db-primary'));
+  const rest = prompts.slice(1);
+  more.hidden = rest.length === 0;
+  more.textContent = rest.length ? `+${rest.length}` : '';
+  more.onclick = () => {
+    const wrap = document.getElementById('promptsList');
+    wrap.innerHTML = '';
+    rest.forEach(pr => wrap.appendChild(promptButton(pr, 'db-primary')));
+    openSheet('promptsSheet');
+  };
+}
+
+on('promptsDoneBtn', 'click', closeSheets);
+
 /* ======================= Focus & flow controls ======================= */
 on('focusBtn', 'click', () => {
   state.settings.focusMode = !state.settings.focusMode;
@@ -6705,7 +6903,12 @@ function makeSheetDismissible(sheet) {
   const swallowClick = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
 
   sheet.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('button, a, label, input, textarea, select, .wheel-col, .heatmap')) return;
+    // Buttons are fair game: a drag that starts on one still dismisses, because
+    // the click that follows is swallowed below. Excluding them made
+    // pull-to-dismiss almost useless on sheets that are mostly buttons — which,
+    // now that Settings is an index of rows, is most of them. What stays
+    // excluded is anything that scrolls or types on its own.
+    if (e.target.closest('input, textarea, select, .wheel-col, .heatmap, .color-swatches')) return;
     if (sheet.scrollTop > 0) return;
 
     armed = true; dragging = false; startY = e.clientY; dy = 0;
@@ -6794,8 +6997,10 @@ function renderAll() {
   if (state.view.current === 'today') renderToday();
   if (state.view.current === 'week') renderWeek();
   if (state.view.current === 'habits') renderHabits();
-  if (state.view.current === 'routines') renderRoutinesView();
-  if (state.view.current === 'chores') renderChoresView();
+  if (state.view.current === 'timers') {
+    paintTimersTab();
+    if (timersTab() === 'routines') renderRoutinesView(); else renderChoresView();
+  }
   if (state.view.current === 'chat') renderChat();
   if (state.view.current === 'stats') renderStats();
   if (state.view.current !== 'today') renderTimeBar();   // hides it off Today

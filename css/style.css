@@ -1368,3 +1368,118 @@ body.undo-open .toast { bottom: 202px; }
 .block.armed .swipe-content,
 .week-block.armed { box-shadow: 0 0 0 2px var(--accent); }
 .drag-ghost { pointer-events: none !important; }
+
+
+/* ============================================================
+   v29 — a calmer surface
+   ============================================================ */
+
+/* ---------- Task rows ---------- */
+/* Urgency is the left edge. It was a tag competing with the title before, and
+   colour already carried the same meaning on the schedule. */
+.inbox-item .swipe-content { border-left: 3px solid transparent; }
+.inbox-item.u-asap .swipe-content { border-left-color: var(--danger); }
+.inbox-item.u-today .swipe-content { border-left-color: var(--accent); }
+.inbox-item.u-week .swipe-content { border-left-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.inbox-item.u-month .swipe-content { border-left-color: color-mix(in srgb, var(--text) 22%, transparent); }
+
+.inbox-item .row-main { flex: 1; min-width: 0; }
+.inbox-item .row-meta {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  margin-top: 3px; font-size: 11px; font-weight: 600; color: var(--text-faint);
+}
+.row-meta .rm-bit { display: inline-flex; align-items: center; gap: 3px; }
+.row-meta .rm-bit .ico { width: 11px; height: 11px; }
+.row-meta .rm-steps { font-variant-numeric: tabular-nums; }
+.row-meta .rm-steps.complete { color: var(--success); }
+.row-meta .rm-dot { opacity: .5; }
+
+/* ---------- Accent discipline ----------
+   Solid accent now means one thing: start this. Everything that merely
+   organises is an outline or plain text, so the eye lands on the one button
+   that matters instead of six competing oranges. */
+.focus-btn.active {
+  background: transparent; color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.carry-btn, .auto-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim); font-weight: 700;
+}
+.carry-btn .ico, .auto-btn .ico { color: var(--accent); }
+.carry-btn:active, .auto-btn:active { background: var(--bg-sunken); color: var(--text); }
+
+/* ---------- Day bar ---------- */
+.day-bar { display: flex; align-items: center; gap: 8px; padding: 6px 16px 0; }
+.db-slot { flex: 1; min-width: 0; }
+.db-primary {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-height: 42px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: transparent; color: var(--text-dim);
+  font-size: 13px; font-weight: 700; text-align: left;
+}
+.db-primary span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-primary .ico { flex-shrink: 0; color: var(--accent); }
+.db-primary:active { background: var(--bg-sunken); color: var(--text); }
+.db-primary.warn {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+}
+.db-primary.warn .ico { color: var(--danger); }
+.db-more {
+  flex-shrink: 0; min-width: 42px; height: 42px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: transparent; color: var(--text-faint);
+  font-size: 12.5px; font-weight: 800;
+}
+.prompts-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+
+/* ---------- Settings index ---------- */
+.set-index { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.set-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; text-align: left; border: none;
+  padding: 13px 15px; border-radius: var(--radius);
+  background: var(--bg-sunken); color: var(--text);
+  position: relative;
+}
+.set-row::after {
+  content: "›"; position: absolute; right: 15px; top: 50%; transform: translateY(-52%);
+  color: var(--text-faint); font-size: 20px; line-height: 1;
+}
+.set-row .sr-name { font-size: 15px; font-weight: 700; }
+.set-row .sr-sub { font-size: 12px; font-weight: 600; color: var(--text-faint); padding-right: 18px; }
+.set-row:active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sub-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.sub-head h2 { margin: 0; font-size: 17px; }
+.back-btn {
+  border: none; background: transparent; color: var(--accent);
+  font-size: 14px; font-weight: 700; padding: 8px 6px 8px 0; min-height: 40px;
+}
+
+/* ---------- Timers tab ---------- */
+.seg-wrap { padding: 10px 16px 4px; flex-shrink: 0; }
+.seg {
+  display: flex; gap: 3px; padding: 3px;
+  background: var(--bg-sunken); border-radius: 12px;
+}
+.seg-btn {
+  flex: 1; min-height: 36px; border: none; border-radius: 9px;
+  background: transparent; color: var(--text-dim);
+  font-size: 13.5px; font-weight: 700;
+}
+.seg-btn.active { background: var(--bg-elev); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.10); }
+.timers-pane { display: flex; flex-direction: column; }
+
+/* ---------- Task sheet disclosure ---------- */
+.more-toggle {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; min-height: 42px; margin-top: 14px;
+  border: none; border-top: 1px solid var(--border); border-radius: 0;
+  background: transparent; color: var(--text-faint);
+  font-size: 13px; font-weight: 700;
+}
+.more-toggle .chev { width: 16px; height: 16px; transition: transform .18s ease; }
+.more-toggle.open .chev { transform: rotate(180deg); }
