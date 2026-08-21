@@ -29,8 +29,8 @@ function on(id, evt, fn, opts) {
 
 /* ======================= Build info ======================= */
 // Bump with every deploy. Surfaced in Settings so a stale cache is obvious.
-const APP_VERSION = 'v29';
-const APP_BUILT = '2026-08-20';
+const APP_VERSION = 'v30';
+const APP_BUILT = '2026-08-21';
 
 /* ======================= Storage ======================= */
 const STORE_KEY = 'dayflow.v1';
@@ -287,7 +287,7 @@ const SETTING_DEFAULTS = {
   pushOn: false, pushServer: null, pushKey: null,
   lastExportAt: null, storagePersisted: null, keepAwake: true,
   license: null, firstRunAt: null, supportDismissedAt: null, work: null,
-  taskSheetExpanded: false,
+  taskSheetExpanded: false, captureKey: null, lastCaptureAt: null,
 };
 
 /* ======================= State ======================= */
@@ -4312,6 +4312,7 @@ const SETTINGS_SECTIONS = {
   setRemindersBtn: { sheet: 'setRemindersSheet', paint: () => { renderRemindersToggle(); renderPushRow(); } },
   setWorkBtn: { sheet: 'setWorkSheet', paint: () => renderWorkRows() },
   setFlowBtn: { sheet: 'setFlowSheet', paint: () => renderFlowToggles() },
+  setVoiceBtn: { sheet: 'voiceSetupSheet', paint: () => renderVoiceSetup() },
   setDataBtn: { sheet: 'setDataSheet', paint: () => renderBackupRow() },
   setAboutBtn: { sheet: 'setAboutSheet', paint: () => { renderSupporterRow(); renderVersionNote(); } },
 };
@@ -4358,6 +4359,9 @@ function settingsSummaries() {
     : externalCount('apple') ? `${externalCount('apple')} imported from Calendar` : 'Google and Apple');
 
   const d = daysSince(state.settings.lastExportAt);
+  set('setVoiceSub', captureConfigured()
+    ? (state.settings.lastCaptureAt ? `Queue on · last collected ${fmtAgo(state.settings.lastCaptureAt)}` : 'Queue ready')
+    : 'Talk to it instead of typing');
   set('setDataSub', d === null ? 'Never backed up' : d === 0 ? 'Backed up today' : `Backed up ${d} day${d === 1 ? '' : 's'} ago`);
   set('setAboutSub', isSupporter() ? `${APP_VERSION} · supporter` : `${APP_VERSION} · feedback and updates`);
 }
@@ -6112,7 +6116,9 @@ function restoreLiveTimer() {
 /* A wake lock is dropped whenever the page is hidden, by design — so it has to
    be taken again every time the app comes back with a timer still going. */
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && anyTimerRunning()) acquireWakeLock();
+  if (document.visibilityState !== 'visible') return;
+  if (anyTimerRunning()) acquireWakeLock();
+  if (captureConfigured()) drainCaptureQueue();
 });
 
 /* ======================= Supporters =======================
@@ -6732,6 +6738,499 @@ function renderDayBar(ds) {
 
 on('promptsDoneBtn', 'click', closeSheets);
 
+/* ======================= Spoken capture =======================
+   The point of this feature is to keep you off the phone, so the design rule
+   is absolute: one sentence in, one action out, never a follow-up question. A
+   parser that asks "did you mean the chore or the habit?" has already lost —
+   it has put you back on the screen you were trying to avoid.
+
+   So this makes a decision every time. Worst case it guesses "task", which is
+   the safe end of the range: an inbox item is trivially fixed, and nothing is
+   ever silently dropped. Everything it does is one undo. */
+
+// Words that tell us what kind of thing is being said, roughly in the order
+// people actually say them.
+const START_WORDS = /^(?:i'?m\s+)?(?:go(?:ing)?\s+to\s+|about\s+to\s+)?(?:start(?:ing)?|begin(?:ning)?|doing|do|time|timing|run(?:ning)?|going\s+to\s+do)\s+(?:the\s+|my\s+|a\s+)?(.+)$/i;
+// Irregular past tenses are how people actually speak. Anything ambiguous here
+// ("read the news") only counts as done if it matches something you track or
+// carries a duration — see the guard below.
+const DONE_WORDS = /^(?:i\s+)?(?:just\s+)?(?:finished|done\s+with|completed|did|practi[cs]ed|logged|drank|drunk|ate|ran|walked|read|wrote|swam|stretched|meditated|cleaned|tidied|took)\s+(?:the\s+|my\s+|a\s+)?(.+)$/i;
+const ADD_WORDS = /^(?:add|remind\s+me\s+to|remember\s+to|i\s+need\s+to|need\s+to|todo|to\s+do|note)\s+(?:the\s+|my\s+|a\s+)?(.+)$/i;
+
+/* Dictation writes numbers as words about as often as digits, and "twenty five
+   minutes" parsing as nothing at all would silently drop the most useful part
+   of the sentence. */
+const NUM_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40,
+  fifty: 50, sixty: 60, ninety: 90,
+};
+
+function wordsToDigits(text) {
+  return text.replace(
+    /\b(twenty|thirty|forty|fifty|sixty)[\s-](one|two|three|four|five|six|seven|eight|nine)\b/gi,
+    (_, tens, ones) => String(NUM_WORDS[tens.toLowerCase()] + NUM_WORDS[ones.toLowerCase()])
+  ).replace(
+    new RegExp('\\b(' + Object.keys(NUM_WORDS).join('|') + ')\\b', 'gi'),
+    (w) => String(NUM_WORDS[w.toLowerCase()])
+  );
+}
+
+// "for 25 minutes", "25 minutes", "half an hour", "an hour and a half"
+function extractDuration(raw) {
+  const text = wordsToDigits(raw);
+  let m = text.match(/\b(?:for\s+)?(?:an?\s+)?hour\s+and\s+a\s+half\b/i);
+  if (m) return { seconds: 90 * 60, rest: text.replace(m[0], '').trim() };
+  m = text.match(/\b(?:for\s+)?half\s+an\s+hour\b/i);
+  if (m) return { seconds: 30 * 60, rest: text.replace(m[0], '').trim() };
+  m = text.match(/\b(?:for\s+)?(?:an?|one)\s+hour\b/i);
+  if (m) return { seconds: 60 * 60, rest: text.replace(m[0], '').trim() };
+  m = text.match(/\b(?:for\s+)?(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)\b/i);
+  if (m) {
+    const n = parseFloat(m[1]);
+    const unit = m[2].toLowerCase();
+    const seconds = /^h/.test(unit) ? Math.round(n * 3600) : Math.round(n * 60);
+    return { seconds, rest: text.replace(m[0], '').trim() };
+  }
+  return null;
+}
+
+function normalise(s) {
+  return (s || '').toLowerCase()
+    .replace(/[.,!?;:]+$/g, '')
+    .replace(/\b(the|my|a|an|some)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* Loose name matching, because dictation will not hand you your own spelling.
+   Exact, then contains-either-way, then a word-overlap score. */
+function bestMatch(name, items, key) {
+  const n = normalise(name);
+  if (!n) return null;
+  const live = items.filter(x => !x.archived);
+  let hit = live.find(x => normalise(x[key]) === n);
+  if (hit) return { item: hit, score: 1 };
+  hit = live.find(x => { const c = normalise(x[key]); return c && (c.includes(n) || n.includes(c)); });
+  if (hit) return { item: hit, score: 0.8 };
+
+  const words = n.split(' ').filter(w => w.length > 2);
+  let best = null, bestScore = 0;
+  live.forEach(x => {
+    const cw = normalise(x[key]).split(' ').filter(w => w.length > 2);
+    if (!cw.length || !words.length) return;
+    const shared = cw.filter(w => words.includes(w)).length;
+    const score = shared / Math.max(cw.length, words.length);
+    if (score > bestScore) { bestScore = score; best = x; }
+  });
+  return bestScore >= 0.5 ? { item: best, score: bestScore } : null;
+}
+
+/* Returns a plan, never performs it — so it can be previewed, tested and
+   explained without side effects. */
+function routeSpokenInput(raw) {
+  const text = (raw || '').trim().replace(/\s+/g, ' ');
+  if (!text) return null;
+
+  const chores = state.chores || [];
+  const habits = state.habits || [];
+  const routines = state.routines || [];
+
+  // --- "add …", "remind me to …" is unambiguous: it's a task ---
+  let m = text.match(ADD_WORDS);
+  if (m) return { kind: 'task', title: m[1].trim(), spoken: text };
+
+  // --- "finished / practised / did X (for 20 minutes)" ---
+  m = text.match(DONE_WORDS);
+  if (m) {
+    let subject = m[1].trim();
+    const dur = extractDuration(subject);
+    if (dur) subject = dur.rest.replace(/\bfor\b\s*$/i, '').trim();
+
+    const habit = bestMatch(subject, habits, 'name');
+    if (habit) {
+      return dur
+        ? { kind: 'habit-log', habit: habit.item, seconds: dur.seconds, spoken: text }
+        : { kind: 'habit-check', habit: habit.item, spoken: text };
+    }
+    const chore = bestMatch(subject, chores, 'name');
+    if (chore && dur) return { kind: 'chore-log', chore: chore.item, seconds: dur.seconds, spoken: text };
+
+    // Finished something DayFlow is already tracking as a task? Tick it off.
+    const task = state.tasks.find(t => !t.done && !t.someday && normalise(t.title) === normalise(subject))
+      || bestMatch(subject, state.tasks.filter(t => !t.done && !t.someday), 'title');
+    const hit = task && task.item ? task.item : task;
+    if (hit) return { kind: 'task-done', task: hit, spoken: text };
+
+    // Nothing matched. With a duration it was plainly something you did, so it
+    // is logged as done; without one, "read the news" is far more likely to be
+    // a thing you want to do than a claim that you did it.
+    return dur
+      ? { kind: 'task-done-new', title: subject, seconds: dur.seconds, spoken: text }
+      : { kind: 'task', title: subject, spoken: text };
+  }
+
+  // --- "start / doing / timing X" ---
+  m = text.match(START_WORDS);
+  if (m) {
+    const subject = m[1].trim();
+    const routine = bestMatch(subject, routines, 'name');
+    if (routine && routine.score >= 0.8) return { kind: 'routine-start', routine: routine.item, spoken: text };
+    const chore = bestMatch(subject, chores, 'name');
+    const habit = bestMatch(subject, habits, 'name');
+    // A tie goes to the chore: chores are the things people time by name.
+    if (chore && (!habit || chore.score >= habit.score)) return { kind: 'chore-start', chore: chore.item, spoken: text };
+    if (habit) return { kind: 'habit-timer', habit: habit.item, spoken: text };
+    return { kind: 'task-start', title: subject, spoken: text };
+  }
+
+  // --- "walked 30 minutes", "guitar 20 mins": a duration with no verb is a log ---
+  const bare = extractDuration(text);
+  if (bare) {
+    const subject = bare.rest.replace(/\bfor\b\s*$/i, '').trim();
+    const h = bestMatch(subject, habits, 'name');
+    if (h) return { kind: 'habit-log', habit: h.item, seconds: bare.seconds, spoken: text };
+    const c = bestMatch(subject, chores, 'name');
+    if (c) return { kind: 'chore-log', chore: c.item, seconds: bare.seconds, spoken: text };
+  }
+
+  // --- A bare name that happens to be a chore or habit still means "start" ---
+  const bareChore = bestMatch(text, chores, 'name');
+  if (bareChore && bareChore.score >= 0.8) return { kind: 'chore-start', chore: bareChore.item, spoken: text };
+  const bareHabit = bestMatch(text, habits, 'name');
+  if (bareHabit && bareHabit.score >= 0.8) return { kind: 'habit-timer', habit: bareHabit.item, spoken: text };
+
+  // --- Anything else is a task. This is the safe fallback, on purpose. ---
+  return { kind: 'task', title: text, spoken: text };
+}
+
+// One line, past tense, so the confirmation reads as a receipt.
+function describeIntent(p) {
+  if (!p) return '';
+  switch (p.kind) {
+    case 'task': return `Added “${p.title}”`;
+    case 'task-start': return `Started “${p.title}”`;
+    case 'task-done': return `Ticked off “${p.task.title}”`;
+    case 'task-done-new': return `Logged “${p.title}” as done`;
+    case 'chore-start': return `Timing ${p.chore.name}`;
+    case 'chore-log': return `Logged ${fmtMinSec(p.seconds)} on ${p.chore.name}`;
+    case 'habit-timer': return `Timing ${p.habit.name}`;
+    case 'habit-log': return `Logged ${fmtMinSec(p.seconds)} of ${p.habit.name}`;
+    case 'habit-check': return `Checked off ${p.habit.name}`;
+    case 'routine-start': return `Starting ${p.routine.name}`;
+    default: return '';
+  }
+}
+
+function applyIntent(p, opts = {}) {
+  if (!p) return null;
+  const ds = todayStr();
+  const quiet = !!opts.quiet;
+
+  const addTask = (title, done) => {
+    const parsed = extractTimeFromTitle(title);
+    const t = {
+      id: uid(), title: parsed ? parsed.title : title,
+      date: currentTodayDateStr(), startMin: null,
+      proposedMin: parsed ? parsed.startMin : undefined,
+      durationMin: typicalMinutes(parsed ? parsed.title : title) || 30,
+      done: !!done, someday: false, subtasks: [],
+      createdAt: Date.now(), touchedAt: Date.now(),
+    };
+    state.tasks.push(t);
+    return t;
+  };
+
+  switch (p.kind) {
+    case 'task': {
+      const t = addTask(p.title, false);
+      saveState('capturing a task');
+      maybeAutoPlace(t);
+      break;
+    }
+    case 'task-start': {
+      const t = addTask(p.title, false);
+      saveState('capturing a task');
+      if (!quiet) startTaskTimer(t, START_SMALL_MIN);
+      break;
+    }
+    case 'task-done':
+      p.task.done = true;
+      touchTask(p.task);
+      saveState('ticking off a task');
+      break;
+    case 'task-done-new':
+      addTask(p.title, true);
+      if (p.seconds) recordTaskTime(p.title, p.seconds);
+      saveState('logging something done');
+      break;
+    case 'chore-start':
+      // Quiet means this arrived from the queue, possibly hours later: opening
+      // a stopwatch then would time the wrong thing entirely, so it is simply
+      // reported rather than started.
+      if (!quiet) startChoreTimer(p.chore);
+      break;
+    case 'chore-log':
+      p.chore.sessions.push(p.seconds);
+      if (p.chore.sessions.length > CHORE_HISTORY_CAP) p.chore.sessions.shift();
+      saveState('logging a chore');
+      break;
+    case 'habit-timer':
+      if (!quiet) startHabitTimer(p.habit);
+      break;
+    case 'habit-log':
+      if (!p.habit.sessions) p.habit.sessions = [];
+      p.habit.sessions.push({ date: ds, seconds: p.seconds, manual: true });
+      if (!p.habit.timed) p.habit.timed = true;
+      if (habitCount(p.habit, ds) < habitTarget(p.habit)) p.habit.completions[ds] = habitCount(p.habit, ds) + 1;
+      saveState('logging a practice session');
+      break;
+    case 'habit-check':
+      bumpHabit(p.habit, ds, 1);
+      break;
+    case 'routine-start':
+      if (!quiet) startRoutine(p.routine);
+      break;
+  }
+  renderAll();
+  return p;
+}
+
+/* ---------- Hold-to-talk ----------
+   One control, full screen, no reading required. Hold, say it, let go. The
+   result is announced and then it closes itself, because the whole promise is
+   that you get to put the phone down. */
+let captureRec = null, captureText = '', captureActive = false, captureTimer = null;
+
+function openCapture() {
+  captureText = '';
+  document.getElementById('captureTranscript').textContent = 'Hold and say what you’re doing';
+  document.getElementById('captureResult').hidden = true;
+  document.getElementById('captureHint').hidden = false;
+  document.getElementById('captureOverlay').hidden = false;
+}
+
+function closeCapture() {
+  stopCaptureListening();
+  const ov = document.getElementById('captureOverlay');
+  if (ov) ov.hidden = true;
+}
+
+on('captureCloseBtn', 'click', closeCapture);
+
+function startCaptureListening() {
+  if (!voiceSupported()) {
+    document.getElementById('captureTranscript').textContent =
+      'This browser can’t listen. Use the keyboard’s mic key, or set up the Siri shortcut in Settings.';
+    return;
+  }
+  captureActive = true;
+  captureText = '';
+  document.getElementById('captureMicBtn').classList.add('listening');
+  document.getElementById('captureTranscript').textContent = 'Listening…';
+  document.getElementById('captureHint').hidden = true;
+
+  try { if (captureRec) captureRec.abort(); } catch (e) { /* ignore */ }
+  captureRec = new SpeechRec();
+  captureRec.lang = 'en-US';
+  captureRec.interimResults = true;
+  captureRec.maxAlternatives = 1;
+  captureRec.onresult = (e) => {
+    let out = '';
+    for (let i = 0; i < e.results.length; i++) out += e.results[i][0].transcript;
+    captureText = out.trim();
+    if (captureText) document.getElementById('captureTranscript').textContent = captureText;
+  };
+  captureRec.onerror = () => { /* handled by the release */ };
+  captureRec.onend = () => {
+    // iOS ends single-shot recognition on its own; keep listening while held.
+    if (captureActive) { try { captureRec.start(); } catch (e) { /* ignore */ } }
+  };
+  try { captureRec.start(); } catch (e) { /* already running */ }
+}
+
+function stopCaptureListening() {
+  captureActive = false;
+  const btn = document.getElementById('captureMicBtn');
+  if (btn) btn.classList.remove('listening');
+  try { if (captureRec) captureRec.stop(); } catch (e) { /* ignore */ }
+}
+
+function finishCapture() {
+  stopCaptureListening();
+  const said = captureText.trim();
+  if (!said) {
+    document.getElementById('captureTranscript').textContent = 'Didn’t catch that — hold and try again';
+    document.getElementById('captureHint').hidden = false;
+    return;
+  }
+  const plan = routeSpokenInput(said);
+  const res = document.getElementById('captureResult');
+  res.hidden = false;
+  res.textContent = describeIntent(plan);
+  document.getElementById('captureTranscript').textContent = `“${said}”`;
+  // Close on its own so the phone can go back in your pocket.
+  clearTimeout(captureTimer);
+  captureTimer = setTimeout(() => {
+    closeCapture();
+    // Applied after the overlay is gone, so a timer's own screen isn't opened
+    // underneath this one.
+    applyIntent(plan);
+    toast(describeIntent(plan) + ' · undo in the top bar', 4500);
+  }, 1400);
+}
+
+function bindCaptureMic() {
+  const btn = document.getElementById('captureMicBtn');
+  if (!btn || btn._bound) return;
+  btn._bound = true;
+  btn.addEventListener('pointerdown', (e) => { e.preventDefault(); startCaptureListening(); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+    btn.addEventListener(ev, () => { if (captureActive) finishCapture(); }));
+  // Keyboard and switch-control users get a plain toggle.
+  btn.addEventListener('keydown', (e) => {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    e.preventDefault();
+    if (captureActive) finishCapture(); else startCaptureListening();
+  });
+}
+
+// Long-press the composer mic to go hands-free instead of dictating into the field.
+(function bindMicLongPress() {
+  const mic = document.getElementById('micBtn');
+  if (!mic) return;
+  let holdTimer = null, opened = false;
+  mic.addEventListener('pointerdown', () => {
+    opened = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => { opened = true; openCapture(); bindCaptureMic(); }, 500);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+    mic.addEventListener(ev, () => clearTimeout(holdTimer)));
+  mic.addEventListener('click', (e) => { if (opened) { e.stopPropagation(); e.preventDefault(); opened = false; } }, true);
+})();
+
+/* ======================= Getting words in without the phone =======================
+   iOS will not deep-link into an installed web app: opening the app's URL from
+   a Shortcut lands in Safari, whose storage is a different partition from the
+   Home Screen app, so anything captured there would arrive in an empty copy of
+   DayFlow. That single fact shapes all three routes below.
+
+   1. QUEUE — the Shortcut posts the words to your own server (the same one
+      that sends reminders) and DayFlow drains the queue next time it opens.
+      Nothing to unlock, nothing to look at. Works from Siri, a watch, AirPods.
+   2. CLIPBOARD — no server: the Shortcut copies the words and opens DayFlow,
+      which offers to paste them. One tap, still no typing.
+   3. IN-APP — hold the mic and talk. Always available. */
+function captureKey() {
+  if (!state.settings.captureKey) {
+    state.settings.captureKey = 'dfk_' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8);
+    saveState('silent');
+  }
+  return state.settings.captureKey;
+}
+
+function captureBase() {
+  const srv = state.settings.pushServer;
+  return srv ? srv.replace(/\/$/, '') : null;
+}
+
+function captureConfigured() { return !!captureBase(); }
+
+async function drainCaptureQueue(opts = {}) {
+  const base = captureBase();
+  if (!base) return 0;
+  try {
+    const res = await fetch(`${base}/capture?key=${encodeURIComponent(captureKey())}`, { method: 'GET' });
+    if (!res.ok) return 0;
+    const data = await res.json();
+    const items = (data.items || []).filter(x => x && x.text);
+    if (!items.length) return 0;
+
+    const done = [];
+    items.forEach(item => {
+      const plan = routeSpokenInput(item.text);
+      if (!plan) return;
+      // Queued items are acted on quietly: a stopwatch that starts hours after
+      // you spoke would be fiction, so timers become logged intent instead.
+      applyIntent(plan, { quiet: true });
+      done.push(describeIntent(plan));
+    });
+    state.settings.lastCaptureAt = Date.now();
+    saveState('silent');
+    renderAll();
+    if (!opts.quiet && done.length) {
+      toast(done.length === 1 ? done[0] : `${done.length} things captured while you were away`, 5000);
+    }
+    return done.length;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/* The clipboard needs a real tap to be read, so this is a one-tap sheet rather
+   than something that happens silently on launch. */
+function openPasteCapture() {
+  const box = document.getElementById('pasteCaptureText');
+  if (box) box.textContent = '';
+  openSheet('pasteCaptureSheet');
+}
+
+on('pasteCaptureBtn', 'click', async () => {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch (e) { text = ''; }
+  if (!text || !text.trim()) {
+    document.getElementById('pasteCaptureText').textContent =
+      'Nothing readable on the clipboard. If iOS asked for permission, allow it and tap again.';
+    return;
+  }
+  const plan = routeSpokenInput(text.trim());
+  closeSheets();
+  applyIntent(plan);
+  toast(describeIntent(plan), 4500);
+});
+on('pasteCaptureCancelBtn', 'click', closeSheets);
+
+/* ---------- Voice setup ---------- */
+function appBaseUrl() { return location.origin + location.pathname.replace(/index\.html$/, ''); }
+
+function renderVoiceSetup() {
+  const url = appBaseUrl();
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  set('voiceCaptureUrl', url + '?capture=1');
+  set('voicePasteUrl', url + '?paste=1');
+  set('voiceKey', captureKey());
+  const base = captureBase();
+  set('voiceServerUrl', base ? base + '/capture' : 'Set up a push server first (Settings › Reminders)');
+
+  const status = document.getElementById('voiceStatus');
+  if (status) {
+    const last = state.settings.lastCaptureAt;
+    status.textContent = base
+      ? `Queue ready. ${last ? 'Last collected ' + fmtAgo(last) + '.' : 'Nothing collected yet.'}`
+      : 'No server yet, so the queue route is unavailable — the clipboard and in-app routes work without one.';
+  }
+}
+
+function openVoiceSetup() { renderVoiceSetup(); openSheet('voiceSetupSheet'); }
+on('setVoiceBtn', 'click', openVoiceSetup);
+on('voiceSetupDoneBtn', 'click', openSettingsIndex);
+on('voiceTryBtn', 'click', () => { closeSheets(); openCapture(); bindCaptureMic(); });
+
+function copyToClipboard(text, label) {
+  navigator.clipboard.writeText(text)
+    .then(() => toast(`${label} copied`))
+    .catch(() => toast(text, 8000));
+}
+on('copyCaptureUrlBtn', 'click', () => copyToClipboard(appBaseUrl() + '?capture=1', 'Address'));
+on('copyServerUrlBtn', 'click', () => {
+  const base = captureBase();
+  if (!base) { toast('Set up a push server first'); return; }
+  copyToClipboard(`${base}/capture`, 'Address');
+});
+on('copyKeyBtn', 'click', () => copyToClipboard(captureKey(), 'Key'));
+
 /* ======================= Focus & flow controls ======================= */
 on('focusBtn', 'click', () => {
   state.settings.focusMode = !state.settings.focusMode;
@@ -6795,7 +7294,7 @@ const TOUR_SLIDES = [
   {
     icon: 'plus',
     title: 'Get it out of your head',
-    body: 'Type or dictate into the bar at the bottom from anywhere in the app. Paste a whole list and each line becomes its own task. No fields, no categories, no decisions — the magnifier in the top bar finds anything again later.',
+    body: 'Type into the bar at the bottom, or <strong>hold the mic</strong> and just say it — “start the dishes”, “practised guitar for 20 minutes”. Paste a whole list and each line becomes its own task.',
   },
   {
     icon: 'bolt',
@@ -7013,6 +7512,16 @@ if (ALARM_RESULT) {
   try { history.replaceState(null, '', location.pathname); } catch (e) { /* non-fatal */ }
 }
 
+/* Voice capture entry points, all of them URL-driven because that is the only
+   handle a Shortcut or a Home Screen icon has on a web app. */
+const CAPTURE_PARAMS = new URLSearchParams(location.search);
+const CAPTURE_MODE = CAPTURE_PARAMS.get('capture');
+const CAPTURE_SAY = CAPTURE_PARAMS.get('say');
+const CAPTURE_PASTE = CAPTURE_PARAMS.get('paste');
+if (CAPTURE_MODE || CAPTURE_SAY || CAPTURE_PASTE) {
+  try { history.replaceState(null, '', location.pathname); } catch (e) { /* non-fatal */ }
+}
+
 /* Shortcuts hands the calendar back the same way it reports alarm results:
    a flag plus the shortcut's text output in `result`. */
 const CAL_PARAMS = new URLSearchParams(location.search);
@@ -7103,6 +7612,28 @@ setInterval(renderTimeBar, 15000);
 renderTimeBar();
 
 if (CAL_RESULT) setTimeout(() => handleCalendarReturn(CAL_RESULT, CAL_PAYLOAD), 500);
+
+// ?say=… lets a Shortcut hand words straight over when the app is opened in a
+// browser tab; ?paste=1 offers the clipboard; ?capture=1 opens the microphone.
+if (CAPTURE_SAY) {
+  setTimeout(() => {
+    const plan = routeSpokenInput(CAPTURE_SAY);
+    applyIntent(plan);
+    toast(describeIntent(plan), 5000);
+  }, 400);
+} else if (CAPTURE_PASTE) {
+  setTimeout(openPasteCapture, 400);
+} else if (CAPTURE_MODE) {
+  setTimeout(() => { openCapture(); bindCaptureMic(); }, 300);
+}
+
+// Anything spoken into the Shortcut while the app was closed is collected on
+// launch, when the app comes back to the foreground, and occasionally in case
+// it is left open.
+if (captureConfigured()) {
+  setTimeout(() => drainCaptureQueue(), 1500);
+  setInterval(() => drainCaptureQueue(), 5 * 60 * 1000);
+}
 
 // A quiet refresh on launch and every half hour, so the grid reflects the
 // calendar without anyone having to remember to press sync.

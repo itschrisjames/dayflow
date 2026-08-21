@@ -65,7 +65,23 @@ is a product here worth putting in the App Store, which is where money actually
 lives — and which needs a native wrapper, $99/year, and the two limitations
 below to disappear.
 
-## 5. What to say when people hit the limits
+## 5. The one-button voice capture
+
+Settings → Voice capture has the setup, with your key and addresses filled in.
+Three routes, in order of how little phone time they need:
+
+1. **Siri → your server.** Shortcut: Dictate Text → Get Contents of URL (POST,
+   JSON, `key` and `text`). Say "Hey Siri, DayFlow" from a locked phone, a
+   watch or AirPods. Nothing opens; the words land next time DayFlow does.
+2. **Siri → clipboard.** Same Shortcut without the server: Dictate Text → Copy
+   to Clipboard → Open URL `…/?paste=1`. One tap to paste when the app opens.
+3. **A talk button on the Home Screen.** Add `…/?capture=1` to the Home Screen
+   and the icon opens straight into the microphone.
+
+Put the Shortcut on the Action Button, Back Tap (Settings → Accessibility →
+Touch → Back Tap) or the Lock Screen and it becomes genuinely one press.
+
+## 6. What to say when people hit the limits
 
 - **"It didn't remind me."** Reminders only fire while DayFlow is open, unless
   the notification server in `server/` is deployed. iOS gives a web app no way
@@ -79,7 +95,7 @@ below to disappear.
 Say these upfront rather than after. People forgive a documented limit and
 resent a surprise.
 
-## 6. Things to have ready before you charge anyone
+## 7. Things to have ready before you charge anyone
 
 - A support email you'll actually read.
 - A one-line refund policy ("email me, I'll refund it, no questions").

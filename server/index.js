@@ -36,7 +36,7 @@ app.use(express.json({ limit: '256kb' }));
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', process.env.ALLOW_ORIGIN || '*');
   res.set('Access-Control-Allow-Headers', 'Content-Type');
-  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -69,7 +69,54 @@ app.post('/unsubscribe', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true, devices: devices.size }));
+/* ---------------------------------------------------------------------------
+ * Capture queue
+ *
+ * iOS will not deep-link into an installed web app, so a Shortcut cannot hand
+ * dictated words to DayFlow directly — opening its URL lands in Safari, whose
+ * storage is a different partition from the Home Screen app. This is the way
+ * round it: the Shortcut posts the words here, and DayFlow collects them the
+ * next time it is opened. Nothing to unlock, nothing to look at.
+ *
+ * The key is a random string DayFlow generates and shows you; it is the only
+ * thing tying a queue to a person. Keep it to yourself, and note that anyone
+ * holding it could add tasks to your inbox — which is the whole of the damage.
+ * -------------------------------------------------------------------------*/
+const captures = new Map();          // key -> [{ text, at }]
+const CAPTURE_MAX = 50;              // per key; a queue this long means nobody is collecting
+const CAPTURE_TTL_MS = 7 * 24 * 3600 * 1000;
+
+function pruneCaptures() {
+  const cutoff = Date.now() - CAPTURE_TTL_MS;
+  for (const [key, list] of captures) {
+    const keep = list.filter(x => x.at >= cutoff);
+    if (keep.length) captures.set(key, keep); else captures.delete(key);
+  }
+}
+setInterval(pruneCaptures, 3600 * 1000);
+
+app.post('/capture', (req, res) => {
+  const { key, text } = req.body || {};
+  if (!key || typeof key !== 'string' || key.length < 8) return res.status(400).json({ error: 'bad key' });
+  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'no text' });
+  const list = captures.get(key) || [];
+  list.push({ text: String(text).slice(0, 500), at: Date.now() });
+  while (list.length > CAPTURE_MAX) list.shift();
+  captures.set(key, list);
+  console.log('captured', key.slice(-6), JSON.stringify(text).slice(0, 60));
+  // Shortcuts shows whatever comes back, so keep it short and human.
+  res.json({ ok: true, queued: list.length, said: text });
+});
+
+app.get('/capture', (req, res) => {
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: 'bad key' });
+  const list = captures.get(key) || [];
+  captures.delete(key);              // handing them over empties the queue
+  res.json({ items: list });
+});
+
+app.get('/health', (_req, res) => res.json({ ok: true, devices: devices.size, queues: captures.size }));
 
 /* Local minutes-since-midnight in the device's own timezone. Storing the
    offset would go stale across DST; asking Intl each time does not. */

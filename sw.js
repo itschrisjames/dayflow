@@ -1,9 +1,9 @@
-const CACHE_NAME = 'dayflow-cache-v29';
+const CACHE_NAME = 'dayflow-cache-v30';
 const ASSETS = [
   './',
   './index.html',
-  './css/style.css?v=29',
-  './js/app.js?v=29',
+  './css/style.css?v=30',
+  './js/app.js?v=30',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

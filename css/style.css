@@ -1483,3 +1483,42 @@ body.undo-open .toast { bottom: 202px; }
 }
 .more-toggle .chev { width: 16px; height: 16px; transition: transform .18s ease; }
 .more-toggle.open .chev { transform: rotate(180deg); }
+
+/* ---------- Hold-to-talk capture ---------- */
+.capture-overlay {
+  position: fixed; inset: 0; z-index: 210;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 22px calc(24px + var(--safe-bottom));
+}
+.capture-close { position: absolute; top: calc(12px + var(--safe-top, 0px)); right: 12px; }
+.capture-body { width: 100%; max-width: 380px; text-align: center; }
+.capture-transcript {
+  font-size: 19px; font-weight: 700; line-height: 1.45; color: var(--text);
+  min-height: 84px; display: flex; align-items: flex-end; justify-content: center;
+  margin-bottom: 34px;
+}
+.capture-mic {
+  width: 132px; height: 132px; border-radius: 66px; margin: 0 auto;
+  border: none; background: var(--accent); color: var(--accent-text);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 35%, transparent);
+  touch-action: none;
+}
+.capture-mic .ico { width: 54px; height: 54px; }
+.capture-mic.listening { animation: capture-pulse 1.1s ease-in-out infinite; }
+@keyframes capture-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+.capture-hint {
+  margin-top: 30px; font-size: 12.5px; line-height: 1.7;
+  color: var(--text-faint); font-weight: 600;
+}
+.capture-result {
+  margin-top: 26px; font-size: 16px; font-weight: 800; color: var(--accent);
+}
+.setup-name.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px; word-break: break-all; font-weight: 600;
+}

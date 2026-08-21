@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=29">
+<link rel="stylesheet" href="css/style.css?v=30">
 </head>
 <body>
 
@@ -730,6 +730,95 @@
   </div>
 </div>
 
+<!-- Hold-to-talk. Deliberately a whole screen with one control: this is
+     meant to be used without looking at it. -->
+<div id="captureOverlay" class="capture-overlay" hidden>
+  <button type="button" id="captureCloseBtn" class="icon-btn capture-close" aria-label="Close"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  <div class="capture-body">
+    <div class="capture-transcript" id="captureTranscript">Hold and say what you're doing</div>
+    <button type="button" id="captureMicBtn" class="capture-mic" aria-label="Hold to talk">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10.5v1.5a7 7 0 0 1-14 0v-1.5"/><path d="M12 19v3"/></svg>
+    </button>
+    <div class="capture-hint" id="captureHint">“start the dishes” · “practised guitar for 20 minutes” · “remind me to call the landlord at 3”</div>
+    <div class="capture-result" id="captureResult" hidden></div>
+  </div>
+</div>
+
+<div id="voiceSetupSheet" class="sheet sheet-tall" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sub-head"><button type="button" class="back-btn" data-back>‹ Settings</button><h2>Voice capture</h2></div>
+    <p class="settings-note" style="text-align:left;margin:0 0 12px;">Say what you're doing and DayFlow works out the rest: <em>“start the dishes”</em> times a chore, <em>“practised guitar for 20 minutes”</em> logs a session, <em>“remind me to call the landlord at 3”</em> makes a task. It never asks a follow-up question — worst case it files a task, which takes one tap to fix.</p>
+    <div class="sheet-actions">
+      <button type="button" id="voiceTryBtn" class="pill-btn accent">Try it now</button>
+    </div>
+    <p class="settings-note" style="text-align:left;">In the app, hold the mic button beside the text field.</p>
+
+    <div class="section-label" style="padding-left:0;margin-top:10px;">Hands-free with Siri</div>
+    <p class="settings-note" id="voiceStatus" style="text-align:left;margin:0 0 10px;"></p>
+    <p class="settings-note" style="text-align:left;margin:0 0 10px;">iOS won't let a web app be opened directly by Siri, so a Shortcut does the listening and hands the words over. Once it exists you can say <strong>“Hey Siri, DayFlow”</strong> from a locked phone, your watch or AirPods — or put it on the Action Button, Back Tap, or the Lock Screen.</p>
+
+    <div class="section-label" style="padding-left:0;">Route 1 — straight to the queue (needs the server)</div>
+    <ol class="setup-steps">
+      <li>New Shortcut → <strong>Dictate Text</strong>.</li>
+      <li>Add <strong>Get Contents of URL</strong>. Set the URL to the address below, Method <strong>POST</strong>, Request Body <strong>JSON</strong>, with two text fields: <strong>key</strong> (the key below) and <strong>text</strong> (the Dictated Text).</li>
+      <li>Name it <strong>DayFlow</strong> and say “Hey Siri, DayFlow”. Nothing opens; the words land next time you open the app.</li>
+    </ol>
+    <div class="setup-name-row">
+      <div>
+        <div class="setup-name-label">Post to</div>
+        <div class="setup-name mono" id="voiceServerUrl">—</div>
+      </div>
+      <button type="button" id="copyServerUrlBtn" class="pill-btn small">Copy</button>
+    </div>
+    <div class="setup-name-row">
+      <div>
+        <div class="setup-name-label">Your key</div>
+        <div class="setup-name mono" id="voiceKey">—</div>
+      </div>
+      <button type="button" id="copyKeyBtn" class="pill-btn small">Copy</button>
+    </div>
+
+    <div class="section-label" style="padding-left:0;margin-top:10px;">Route 2 — no server</div>
+    <ol class="setup-steps">
+      <li>New Shortcut → <strong>Dictate Text</strong> → <strong>Copy to Clipboard</strong>.</li>
+      <li>Add <strong>Open URL</strong> with the address below.</li>
+      <li>Name it <strong>DayFlow</strong>. Speak, then tap Paste when DayFlow opens.</li>
+    </ol>
+    <div class="setup-name-row">
+      <div>
+        <div class="setup-name-label">Open</div>
+        <div class="setup-name mono" id="voicePasteUrl">—</div>
+      </div>
+    </div>
+
+    <div class="section-label" style="padding-left:0;margin-top:10px;">Route 3 — a talk button on your Home Screen</div>
+    <p class="settings-note" style="text-align:left;margin:0 0 10px;">Open this address in Safari and add it to your Home Screen. The icon opens straight into the microphone, so it's one tap and talk.</p>
+    <div class="setup-name-row">
+      <div>
+        <div class="setup-name-label">Address</div>
+        <div class="setup-name mono" id="voiceCaptureUrl">—</div>
+      </div>
+      <button type="button" id="copyCaptureUrlBtn" class="pill-btn small">Copy</button>
+    </div>
+
+    <button id="voiceSetupDoneBtn" class="primary-btn">Done</button>
+  </div>
+</div>
+
+<div id="pasteCaptureSheet" class="sheet" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <h2>Paste what you said</h2>
+    <p class="settings-note" style="text-align:left;margin:0 0 12px;">iOS only lets a web page read the clipboard when you ask it to, so this needs one tap.</p>
+    <p class="settings-note" id="pasteCaptureText" style="text-align:left;margin:0 0 12px;"></p>
+    <div class="sheet-actions">
+      <button type="button" id="pasteCaptureCancelBtn" class="pill-btn">Not now</button>
+    </div>
+    <button id="pasteCaptureBtn" class="primary-btn">Paste and file it</button>
+  </div>
+</div>
+
 <div id="promptsSheet" class="sheet" role="dialog" aria-modal="true" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-body">
@@ -763,6 +852,9 @@
       </button>
       <button type="button" class="set-row" id="calendarBtn">
         <span class="sr-name">Calendar sync</span><span class="sr-sub" id="setCalSub">Google and Apple</span>
+      </button>
+      <button type="button" class="set-row" id="setVoiceBtn">
+        <span class="sr-name">Voice capture</span><span class="sr-sub" id="setVoiceSub">Talk to it instead of typing</span>
       </button>
       <button type="button" class="set-row" id="setDataBtn">
         <span class="sr-name">Your data</span><span class="sr-sub" id="setDataSub">Backups, imports, repeats, archive</span>
@@ -960,6 +1052,6 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="js/app.js?v=29"></script>
+<script src="js/app.js?v=30"></script>
 </body>
 </html>
